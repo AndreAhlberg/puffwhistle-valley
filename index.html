@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Puffwhistle Valley</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --cream: #fff7e6; --ink: #4a3426; --line: #e9d6b4; --accent: #ff7a59; --go: #3fb36b;
+    --font: 'Baloo 2', 'Trebuchet MS', 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #6aa84f; font-family: var(--font); color: var(--ink); user-select: none; -webkit-user-select: none; }
+  canvas { position: fixed; inset: 0; touch-action: none; display: block; }
+  button { font-family: var(--font); color: var(--ink); cursor: pointer; }
+
+  #top { position: fixed; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--cream); border-bottom: 4px solid var(--line); border-radius: 0 0 18px 18px; box-shadow: 0 4px 14px rgba(0,0,0,.15); z-index: 25; }
+  .brand { font-weight: 800; font-size: 22px; white-space: nowrap; }
+  .chip { background: #fff; border: 3px solid var(--line); border-radius: 999px; padding: 0 14px; font-weight: 800; font-size: 20px; min-width: 86px; text-align: center; }
+  .spacer { flex: 1; }
+  .seg { display: flex; background: #fff; border: 3px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .seg button { border: 0; background: none; font-size: 18px; padding: 4px 10px; }
+  .seg button.on { background: #ffe08a; }
+  .icon { border: 3px solid var(--line); background: #fff; border-radius: 14px; font-size: 18px; padding: 3px 10px; font-weight: 700; white-space: nowrap; }
+  .icon.armed { background: #ffd0c4; border-color: var(--accent); }
+  .icon.off { opacity: .45; }
+  #season { font-size: 17px; min-width: 0; white-space: nowrap; cursor: help; }
+  #tools button.dim { opacity: .45; }
+
+  #bottom { position: fixed; bottom: 0; left: 0; right: 0; display: flex; gap: 14px; align-items: stretch; padding: 8px 14px 10px; background: var(--cream); border-top: 4px solid var(--line); border-radius: 18px 18px 0 0; box-shadow: 0 -4px 14px rgba(0,0,0,.15); z-index: 5; }
+  #tools { display: flex; gap: 8px; }
+  #tools button { width: 84px; border: 4px solid var(--line); background: #fff; border-radius: 18px; display: flex; flex-direction: column; align-items: center; padding: 4px 0 2px; line-height: 1.05; transition: transform .1s; }
+  #tools button:hover { transform: translateY(-2px); }
+  #tools button.on { background: #ffe08a; border-color: #f2b632; transform: translateY(-4px); }
+  #tools .em { font-size: 30px; }
+  #tools b { font-size: 15px; }
+  #tools i { font-style: normal; font-size: 12px; opacity: .75; }
+  #quests { flex: 1; display: flex; gap: 8px; min-width: 0; }
+  .q { flex: 1; min-width: 0; background: #fff; border: 3px solid var(--line); border-radius: 16px; padding: 4px 10px; display: flex; flex-direction: column; justify-content: center; }
+  .q .t { font-weight: 700; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .q .bar { height: 10px; background: #f1e6d0; border-radius: 99px; overflow: hidden; margin: 3px 0 1px; }
+  .q .bar i { display: block; height: 100%; background: linear-gradient(90deg, #ffcf3f, #ff9f43); border-radius: 99px; transition: width .3s; }
+  .q small { font-size: 12px; opacity: .7; }
+
+  #hint { position: fixed; left: 14px; bottom: 112px; max-width: min(460px, calc(100vw - 28px)); display: flex; gap: 8px; align-items: flex-start; background: rgba(255,255,255,.94); border: 3px solid var(--line); border-radius: 18px 18px 18px 4px; padding: 6px 12px; font-weight: 600; font-size: 16px; pointer-events: none; z-index: 4; box-shadow: 0 3px 10px rgba(0,0,0,.15); }
+  #hint .who { font-size: 26px; line-height: 1; }
+
+  #panel { position: fixed; right: 14px; top: 74px; width: 300px; background: var(--cream); border: 4px solid var(--line); border-radius: 18px; padding: 10px 12px; z-index: 6; box-shadow: 0 6px 18px rgba(0,0,0,.2); }
+  #panel .ph { display: flex; align-items: center; gap: 6px; font-weight: 800; font-size: 20px; border-bottom: 3px solid var(--line); padding-bottom: 4px; margin-bottom: 6px; }
+  #panel .ph small { font-weight: 600; font-size: 13px; opacity: .7; }
+  #panel .ph .x { margin-left: auto; border: 0; background: none; font-size: 18px; }
+  #panel .sw { width: 16px; height: 16px; border-radius: 5px; display: inline-block; border: 2px solid rgba(0,0,0,.25); }
+  #panel .row { font-size: 15px; margin: 3px 0; }
+  #panel .row b { font-weight: 800; }
+  #panel .cur { background: #ffe08a; border-radius: 6px; padding: 0 4px; }
+  #panel .btns { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  #panel .btns button { flex: 1; border: 3px solid var(--line); background: #fff; border-radius: 12px; font-weight: 700; font-size: 14px; padding: 4px 6px; white-space: nowrap; }
+  #panel .btns button.armed { background: #ffd0c4; border-color: var(--accent); }
+  #panel .bar { height: 10px; background: #f1e6d0; border-radius: 99px; overflow: hidden; margin-top: 2px; }
+  #panel .bar i { display: block; height: 100%; background: #7ed37e; }
+
+  #decobar { position: fixed; left: 50%; top: 74px; transform: translateX(-50%); background: var(--cream); border: 4px solid var(--line); border-radius: 18px; padding: 8px 10px; z-index: 6; box-shadow: 0 6px 18px rgba(0,0,0,.2); max-width: calc(100vw - 28px); }
+  #decobar .eng { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+  #decobar button { border: 3px solid var(--line); background: #fff; border-radius: 12px; font-weight: 700; font-size: 13px; padding: 3px 6px; display: flex; flex-direction: column; align-items: center; line-height: 1.1; min-width: 70px; }
+  #decobar button.on { background: #ffe08a; border-color: #f2b632; }
+  #decobar canvas { position: static; display: block; margin-bottom: 2px; }
+  #decobar small { font-size: 11px; font-weight: 600; opacity: .75; }
+  #routebar { position: fixed; left: 50%; top: 74px; transform: translateX(-50%); background: var(--cream); border: 4px solid var(--line); border-radius: 18px; padding: 8px 12px; z-index: 6; box-shadow: 0 6px 18px rgba(0,0,0,.2); max-width: calc(100vw - 28px); display: flex; flex-direction: column; gap: 6px; align-items: center; }
+  #routebar .rt { font-weight: 700; font-size: 16px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; justify-content: center; }
+  #routebar .rt span { background: #fff; border: 2px solid var(--line); border-radius: 10px; padding: 0 8px; }
+  #routebar .rt .dim { opacity: .6; border-style: dashed; }
+  #routebar em { font-style: normal; font-weight: 800; }
+  #routebar .eng, #routebar .go { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+  #routebar .eng button { border: 3px solid var(--line); background: #fff; border-radius: 12px; font-weight: 700; font-size: 14px; padding: 2px 10px; display: flex; flex-direction: column; align-items: center; line-height: 1.1; }
+  #routebar .eng button.on { background: #ffe08a; border-color: #f2b632; }
+  #routebar .eng button:disabled { opacity: .5; cursor: default; }
+  #routebar .eng small { font-size: 11px; font-weight: 600; opacity: .75; }
+  #routebar .go button { border: 3px solid var(--line); background: #fff; border-radius: 12px; font-weight: 800; font-size: 16px; padding: 2px 14px; }
+  #routebar .go button[data-act="go"] { background: var(--go); color: #fff; border-color: #2a8a4f; }
+  #routebar .go button:disabled { opacity: .45; cursor: default; }
+
+  #toast { position: fixed; left: 50%; top: 80px; transform: translate(-50%, -20px); background: #4a3426; color: #fff; font-weight: 700; font-size: 18px; padding: 6px 18px; border-radius: 22px; opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; z-index: 9; width: max-content; max-width: calc(100vw - 28px); text-align: center; }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  #welcome { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(40,70,30,.45); z-index: 20; padding: 16px; }
+  #welcome .card { background: var(--cream); border: 5px solid var(--line); border-radius: 26px; padding: 22px 26px; max-width: 480px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,.3); }
+  #welcome h1 { margin: 0; font-size: 34px; font-weight: 800; }
+  #welcome p { font-size: 18px; font-weight: 600; margin: 10px 0; }
+  #welcome .big { font-size: 46px; }
+  #welcome button { margin-top: 8px; font-size: 22px; font-weight: 800; border: 0; background: var(--go); color: #fff; border-radius: 16px; padding: 8px 30px; box-shadow: 0 4px 0 #2a8a4f; }
+  [hidden] { display: none !important; }
+
+  @media (max-width: 900px) {
+    .brand { display: none; }
+    #bottom { flex-direction: column; gap: 6px; }
+    #tools { justify-content: center; }
+    #tools button { width: 56px; }
+    #tools b { font-size: 12px; }
+    #season { font-size: 14px; padding: 0 8px; }
+    #tools .em { font-size: 24px; }
+    #quests .q:nth-child(n+2) { display: none; }
+    #hint { bottom: 170px; font-size: 14px; }
+    #panel { width: calc(100vw - 28px); }
+  }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<div id="top">
+  <div class="brand">🚂 <span data-i18n>Puffwhistle Valley</span></div>
+  <div class="chip" id="coins">🪙 0</div>
+  <div class="chip" id="stars">⭐ 0</div>
+  <div class="chip" id="season"></div>
+  <div class="spacer"></div>
+  <div class="seg" id="speed">
+    <button data-speed="0" data-i18n-title="Pause">⏸</button>
+    <button data-speed="1" data-i18n-title="Normal speed" class="on">▶</button>
+    <button data-speed="2.5" data-i18n-title="Fast">⏩</button>
+  </div>
+  <button class="icon" id="sound" data-i18n-title="Sound on/off">🔊</button>
+  <button class="icon" id="music" data-i18n-title="Music on/off">🎵</button>
+  <button class="icon" id="lang" data-i18n-title="Switch language">🌐 Svenska</button>
+  <button class="icon" id="newmap" data-i18n-title="Start a new valley">🗺️ New map</button>
+</div>
+
+<div id="bottom">
+  <div id="tools">
+    <button data-tool="look" class="on"><span class="em">👆</span><b data-i18n>Look</b><i>1</i></button>
+    <button data-tool="track"><span class="em">🛤️</span><b data-i18n>Track</b><i>2🪙</i></button>
+    <button data-tool="station"><span class="em">🚉</span><b data-i18n>Station</b><i>15🪙</i></button>
+    <button data-tool="train"><span class="em">🚂</span><b data-i18n>Train</b><i>50🪙</i></button>
+    <button data-tool="deco"><span class="em">🌷</span><b data-i18n>Decorate</b><i>2🪙+</i></button>
+    <button data-tool="remove"><span class="em">🧹</span><b data-i18n>Remove</b><i>6</i></button>
+    <button id="undo" data-i18n-title="Undo (Z)"><span class="em">↩️</span><b data-i18n>Undo</b><i>Z</i></button>
+  </div>
+  <div id="quests"></div>
+</div>
+
+<div id="hint"><span class="who">👩‍✈️</span><span id="hinttext"></span></div>
+<div id="panel" hidden></div>
+<div id="routebar" hidden></div>
+<div id="decobar" hidden></div>
+<div id="toast"></div>
+
+<div id="welcome" hidden>
+  <div class="card">
+    <div class="big">🚂🍎🧸</div>
+    <h1 data-i18n>Puffwhistle Valley</h1>
+    <p data-i18n>Lay train tracks, build stations and carry people, apples, milk, logs, cupcakes and toys around the valley.</p>
+    <p data-i18n>Towns that get lots of deliveries grow bigger! 🏠</p>
+    <button id="startbtn" data-i18n>Let's go!</button>
+  </div>
+</div>
+
+<script src="game.js"></script>
+</body>
+</html>
