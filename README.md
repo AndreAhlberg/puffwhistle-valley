@@ -3,7 +3,9 @@
 A cosy single-player train game for kids. Lay track, build stations and run trains that carry
 people and goods around a little valley. Towns grow when they get deliveries.
 
-Open `index.html` in a browser. There's no build step and no server needed.
+**▶ Play it here: https://andreahlberg.github.io/puffwhistle-valley/**
+
+Or open `index.html` in a browser. There's no build step and no server needed.
 
 ## How to play
 - **🛤️ Track** (2🪙, bridges 8🪙, tunnels 6🪙): drag to draw ghost rails with a running cost, then let go
