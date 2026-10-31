@@ -22,15 +22,29 @@ const CARGO = {
   logs:   { e: '🪵', name: 'Logs', rate: 2 },
   cakes:  { e: '🧁', name: 'Cupcakes', rate: 5 },
   toys:   { e: '🧸', name: 'Toys', rate: 6 },
+  fish:   { e: '🐟', name: 'Fish', rate: 3 },
+  sticks: { e: '🍤', name: 'Fish fingers', rate: 6 },
+  stone:  { e: '🪨', name: 'Stone', rate: 2 },
+  bricks: { e: '🧱', name: 'Bricks', rate: 5 },
 };
 const KINDS = {
-  town:    { e: '🏘️', label: 'Town', produces: ['people'], accepts: ['people', 'apples', 'milk', 'cakes', 'toys'] },
+  town:    { e: '🏘️', label: 'Town', produces: ['people'], accepts: ['people', 'apples', 'milk', 'cakes', 'toys', 'sticks', 'bricks'] },
   orchard: { e: '🍎', label: 'Apple Orchard', produces: ['apples'], accepts: [], rate: 4, names: ['Rosy Orchard', 'Appleby Orchard', 'Crunchy Orchard'] },
   farm:    { e: '🐄', label: 'Farm', produces: ['wheat', 'milk'], accepts: [], rate: 3, names: ['Sunny Farm', 'Clover Farm', 'Haystack Farm'] },
   lumber:  { e: '🌲', label: 'Lumber Camp', produces: ['logs'], accepts: [], rate: 4, names: ['Pinewood Camp', 'Oak Hollow Camp', 'Timber Top Camp'] },
   bakery:  { e: '🧁', label: 'Bakery', produces: [], accepts: ['wheat', 'milk'], makes: 'cakes', names: ['Sprinkles Bakery', 'Crumb Corner Bakery'] },
   toyshop: { e: '🧸', label: 'Toy Workshop', produces: [], accepts: ['logs'], makes: 'toys', names: ['Tinker Toy Workshop', 'Wobble Toy Workshop'] },
+  harbour: { e: '⚓', label: 'Harbour', produces: ['fish'], accepts: [], rate: 4, names: ['Seagull Harbour', 'Bobbing Boat Harbour'] },
+  fishfac: { e: '🍤', label: 'Fish Finger Factory', produces: [], accepts: ['fish'], makes: 'sticks', names: ['Crispy Fish Factory', 'Goldfin Fish Factory'] },
+  quarry:  { e: '⛏️', label: 'Quarry', produces: ['stone'], accepts: [], rate: 4, names: ['Rumble Rock Quarry', 'Pebblestone Quarry'] },
+  bricks:  { e: '🧱', label: 'Brickworks', produces: [], accepts: ['stone'], makes: 'bricks', names: ['Red Brick Works', 'Busy Bee Brickworks'] },
 };
+// Paint shop. Fancier choices unlock with stars.
+const PAINT_COLORS = [...['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#e84393', '#16a085', '#e67e22', '#2d98da', '#20bf6b'].map(c => ({ c, stars: 0 })),
+  { c: '#2d3436', stars: 1 }, { c: '#d4a017', stars: 2 }, { c: '#ff9ff3', stars: 3 }, { c: 'rainbow', stars: 5 }];
+const PATTERNS = [{ id: 'plain', name: 'Plain', stars: 0 }, { id: 'stripes', name: 'Stripes', stars: 1 }, { id: 'spots', name: 'Spots', stars: 2 }, { id: 'stars', name: 'Stars', stars: 4 }];
+const FACES = [{ id: 'none', e: '—', stars: 0 }, { id: 'smile', e: '🙂', stars: 0 }, { id: 'wow', e: '😮', stars: 1 }, { id: 'cool', e: '😎', stars: 3 }];
+const COST_BUS = 40, BUS_CAP = 10, BUS_SPEED = 1.5;
 const ENGINES = [
   { id: 'puffer', name: 'Puffer', speed: 2.2, cost: 50, stars: 0, wagons: 2, stripe: null },
   { id: 'dasher', name: 'Dasher', speed: 3.2, cost: 110, stars: 3, wagons: 3, stripe: '#ffffff' },
@@ -55,6 +69,10 @@ const TIPS = [
   'Each season one kind of goods pays double. Look at the top bar!',
   'Lamp posts 💡 light up the valley at night!',
   'Cars wait at the crossing when a train comes. 🚗',
+  'Fish Finger Factories turn 🐟 fish into 🍤 fish fingers!',
+  'Brickworks turn 🪨 stone into 🧱 bricks. Bricks make towns grow super fast!',
+  'Buses 🚌 carry passengers along the roads between towns.',
+  'Click a train to make it toot! Paint it 🎨 in its panel.',
 ];
 // Each season one cargo pays double. The palette repaints the valley.
 const SEASONS = [
@@ -94,8 +112,6 @@ const SV = {
   'Look': 'Titta', 'Track': 'Spår', 'Station': 'Station', 'Train': 'Tåg', 'Remove': 'Ta bort',
   'Pause': 'Pausa', 'Normal speed': 'Normal fart', 'Fast': 'Snabbt', 'Sound on/off': 'Ljud på/av', 'Start a new valley': 'Börja en ny dal',
   'Switch language': 'Byt språk',
-  'Lay train tracks, build stations and carry people, apples, milk, logs, cupcakes and toys around the valley.':
-    'Lägg tågspår, bygg stationer och kör passagerare, äpplen, mjölk, timmer, muffins och leksaker runt i dalen.',
   'Towns that get lots of deliveries grow bigger! 🏠': 'Städer som får många leveranser växer sig större! 🏠',
   "Let's go!": 'Kör igång!',
   'Passengers': 'Passagerare', 'Apples': 'Äpplen', 'Wheat': 'Vete', 'Milk': 'Mjölk', 'Logs': 'Timmer', 'Cupcakes': 'Muffins', 'Toys': 'Leksaker',
@@ -177,6 +193,25 @@ const SV = {
   'Lamp posts 💡 light up the valley at night!': 'Lyktstolpar 💡 lyser upp dalen på natten!',
   'Cars wait at the crossing when a train comes. 🚗': 'Bilarna väntar vid övergången när ett tåg kommer. 🚗',
   '{s} · {e} pays double': '{s} · {e} ger dubbelt',
+  'Fish': 'Fisk', 'Fish fingers': 'Fiskpinnar', 'Stone': 'Sten', 'Bricks': 'Tegel',
+  'Harbour': 'Hamn', 'Fish Finger Factory': 'Fiskpinnefabrik', 'Quarry': 'Stenbrott', 'Brickworks': 'Tegelbruk',
+  'Lay train tracks, build stations and carry people, apples, milk, fish, stone, cupcakes and toys around the valley.':
+    'Lägg tågspår, bygg stationer och kör passagerare, äpplen, mjölk, fisk, sten, muffins och leksaker runt i dalen.',
+  'Fish Finger Factories turn 🐟 fish into 🍤 fish fingers!': 'Fiskpinnefabriker gör 🍤 fiskpinnar av 🐟 fisk!',
+  'Brickworks turn 🪨 stone into 🧱 bricks. Bricks make towns grow super fast!': 'Tegelbruk gör 🧱 tegel av 🪨 sten. Tegel får städer att växa jättefort!',
+  'Buses 🚌 carry passengers along the roads between towns.': 'Bussar 🚌 kör passagerare längs vägarna mellan städerna.',
+  'Click a train to make it toot! Paint it 🎨 in its panel.': 'Klicka på ett tåg så tutar det! Måla det 🎨 i dess panel.',
+  'Toot toot!': 'Tut tut!', 'Beep beep!': 'Pip pip!', 'Quack!': 'Kvack!',
+  '🎨 Paint': '🎨 Måla', 'Colour': 'Färg', 'Pattern': 'Mönster', 'Face': 'Ansikte',
+  'Plain': 'Enfärgad', 'Stripes': 'Ränder', 'Spots': 'Prickar', 'Stars': 'Stjärnor', 'Unlocks at {n} ⭐': 'Låses upp vid {n} ⭐',
+  'Bus': 'Buss', 'Bus {n}': 'Buss {n}',
+  'Click a town to start a bus route. Buses drive on the roads 🚌': 'Klicka på en stad för att börja en busslinje. Bussar kör på vägarna 🚌',
+  'Now click another town joined to it by a road!': 'Klicka nu på en annan stad som har väg dit!',
+  "Those towns aren't joined by a road. 🚌": 'De städerna har ingen väg mellan sig. 🚌',
+  'Click on a town! 🏘️': 'Klicka på en stad! 🏘️',
+  'There are no roads here. Try a 🗺️ New map!': 'Det finns inga vägar här. Prova en 🗺️ Ny karta!',
+  'Beep beep! {name} is on its way! 🚌': 'Pip pip! {name} är på väg! 🚌',
+  '🚌 Driving': '🚌 Kör', '🧒 At the bus stop': '🧒 Vid hållplatsen',
 };
 const NAMES_SV = {
   'Maple Town': 'Lönnstad', 'Puddleby': 'Pölby', 'Honeyhill': 'Honungsbacka', 'Pebble Cove': 'Stenviken', 'Sunnyvale': 'Soldalen',
@@ -187,6 +222,10 @@ const NAMES_SV = {
   'Pinewood Camp': 'Tallskogslägret', 'Oak Hollow Camp': 'Ekdalslägret', 'Timber Top Camp': 'Timmertoppslägret',
   'Sprinkles Bakery': 'Strösselbageriet', 'Crumb Corner Bakery': 'Smulhörnans bageri',
   'Tinker Toy Workshop': 'Pysslets leksaksverkstad', 'Wobble Toy Workshop': 'Vickans leksaksverkstad',
+  'Seagull Harbour': 'Måsviks hamn', 'Bobbing Boat Harbour': 'Guppbåtshamnen',
+  'Crispy Fish Factory': 'Krispiga fiskfabriken', 'Goldfin Fish Factory': 'Guldfenans fiskfabrik',
+  'Rumble Rock Quarry': 'Mullerstensbrottet', 'Pebblestone Quarry': 'Kiselstensbrottet',
+  'Red Brick Works': 'Rödtegelbruket', 'Busy Bee Brickworks': 'Flitiga biets tegelbruk',
   'Puffer': 'Puffaren', 'Dasher': 'Susaren', 'Comet': 'Kometen',
   'Puffy': 'Puffis', 'Zippy': 'Zippan', 'Biscuit': 'Kexet', 'Bramble': 'Björnbär', 'Sunny': 'Solis', 'Clover': 'Klöver',
   'Pepper': 'Pepparn', 'Jellybean': 'Gelébönan', 'Tumble': 'Tumla', 'Button': 'Knappen', 'Noodle': 'Nudeln', 'Waffles': 'Våffla',
@@ -231,7 +270,7 @@ const cache = document.createElement('canvas');
 let dpr = 1, dirty = true;
 const view = { s: 30, ox: 0, oy: 0 };
 let G = null;
-let tool = 'look', hover = null, hoverW = null, down = false, lastTile = null, sel = null;
+let tool = 'look', hover = null, hoverW = null, down = false, lastTile = null, sel = null, busDraft = -1, paintOpen = false;
 let routeDraft = [], draftEngine = 'puffer', speed = 1, muted = false, armed = null;
 const smoke = [], floaters = [], confetti = [], weather = [];
 let emo = [], cars = [], trainPts = [], animDeco = [], lights = [];
@@ -255,7 +294,7 @@ function newGame(seed) {
     v: 1, seed, coins: 250, stars: 0, time: 0, prodT: 0, nextId: 1, nameIx: 0, rr: 0, piggyAt: -999,
     terr: new Uint8Array(W * H), conn: new Uint8Array(W * H), road: new Uint8Array(W * H), deco: new Uint8Array(W * H),
     occ: new Int16Array(W * H).fill(-1), stn: new Int32Array(W * H).fill(-1),
-    places: [], stations: [], trains: [], roads: [], stats: { delivered: {}, earned: 0 }, quests: [],
+    places: [], stations: [], trains: [], roads: [], buses: [], busN: 0, stats: { delivered: {}, earned: 0 }, quests: [],
   };
   genMap(seed);
   initCars(); undoStack.length = 0; curSeason = -1; draft = null;
@@ -305,7 +344,8 @@ function genMap(seed) {
   const towns = shuffle(TOWN_NAMES.slice(), R);
   const names = {};
   for (const k in KINDS) if (KINDS[k].names) names[k] = shuffle(KINDS[k].names.slice(), R);
-  const order = ['town', 'town', 'town', 'town', 'lumber', 'toyshop', 'farm', 'bakery', 'orchard', ['orchard', 'farm', 'lumber'][ri(0, 2)]];
+  const order = ['town', 'town', 'town', 'town', 'harbour', 'quarry', 'lumber', 'toyshop', 'farm', 'bakery', 'orchard', 'fishfac', 'bricks', ['orchard', 'farm', 'lumber'][ri(0, 2)]];
+  const near = (area, r, terr) => area.some(i => { for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const x = tx(i) + dx, y = ty(i) + dy; if (inB(x, y) && G.terr[idx(x, y)] === terr) return true; } return false; });
   for (const kind of order) {
     for (let tries = 0; tries < 800; tries++) {
       const minD = (kind === 'town' ? 10 : 7) - Math.floor(tries / 200) * 1.5;
@@ -317,6 +357,9 @@ function genMap(seed) {
       else area.push(idx(x, y), idx(x + 1, y), idx(x, y + 1), idx(x + 1, y + 1));
       if (area.some(i => G.terr[i] === WATER || G.terr[i] === HILL || G.occ[i] >= 0)) continue;
       if (G.places.some(p => Math.hypot(p.cx - cx, p.cy - cy) < minD)) continue;
+      // harbours sit on the water's edge; quarries dig into a hill (relaxed if the map has no good spot)
+      if (kind === 'harbour' && tries < 700 && !near(area, 1, WATER)) continue;
+      if (kind === 'quarry' && tries < 500 && !near(area, 2, HILL)) continue;
       const p = { id: G.places.length, kind, x, y, cx, cy, tiles: [], stock: {}, growth: 0 };
       if (isTown) {
         p.name = towns.pop();
@@ -762,20 +805,89 @@ function turnPts(pts, t, e, x) {
 
 // ---------- cars ----------
 // Cars shuttle along each road. They stop before a level crossing while a train is close to it.
+// A smooth drivable line along a list of road tiles.
+function roadMover(path) {
+  const pts = [center(path[0]), edgeMid(path[0], dirTo(path[0], path[1]))];
+  for (let k = 1; k < path.length - 1; k++) turnPts(pts, path[k], OPP(dirTo(path[k - 1], path[k])), dirTo(path[k], path[k + 1]));
+  pts.push(center(path[path.length - 1]));
+  const trail = mkTrail(pts), len = trailEnd({ trail });
+  // where along the trail each road tile's centre sits
+  const at = path.map(i => { const [cx, cy] = center(i); let best = 0, bd = 9; for (const p of trail) { const d = Math.hypot(p.x - cx, p.y - cy); if (d < bd) { bd = d; best = p.s; } } return best; });
+  return { path, trail, len, at };
+}
 function initCars() {
   cars = [];
   G.roads.forEach((path, n) => {
     if (path.length < 3) return;
-    const pts = [center(path[0]), edgeMid(path[0], dirTo(path[0], path[1]))];
-    for (let k = 1; k < path.length - 1; k++) turnPts(pts, path[k], OPP(dirTo(path[k - 1], path[k])), dirTo(path[k], path[k + 1]));
-    pts.push(center(path[path.length - 1]));
-    const trail = mkTrail(pts), len = trailEnd({ trail });
-    // where along the trail each road tile's centre sits
-    const at = path.map(i => { const [cx, cy] = center(i); let best = 0, bd = 9; for (const p of trail) { const d = Math.hypot(p.x - cx, p.y - cy); if (d < bd) { bd = d; best = p.s; } } return best; });
+    const m = roadMover(path);
     for (let k = 0; k < (path.length > 10 ? 2 : 1); k++) {
-      cars.push({ path, trail, len, at, s: k ? len : 0, dir: k ? -1 : 1, wait: 0.5 + k * 2 + Math.random(), v: 1.2 + Math.random() * 0.5, col: CAR_COLS[(n * 2 + k) % CAR_COLS.length] });
+      cars.push({ ...m, s: k ? m.len : 0, dir: k ? -1 : 1, wait: 0.5 + k * 2 + Math.random(), v: 1.2 + Math.random() * 0.5, col: CAR_COLS[(n * 2 + k) % CAR_COLS.length] });
     }
   });
+  for (const rec of G.buses) spawnBus(rec);
+}
+
+// ---------- buses ----------
+// A bus shuttles between two towns along the roads, collecting passengers straight from the towns.
+const BUS_COLS = ['#ffc83d', '#ff6b6b', '#4dabf7', '#69db7c', '#b197fc'];
+const busById = id => G.buses.find(b => b.id === id);
+const busCar = rec => cars.find(c => c.bus === rec);
+// Breadth-first search along the roads from beside town a to beside town b.
+function roadRoute(a, b) {
+  const touches = (p, i) => p.tiles.some(j => Math.abs(tx(j) - tx(i)) + Math.abs(ty(j) - ty(i)) === 1);
+  const prev = new Int32Array(W * H).fill(-2), q = [];
+  for (let i = 0; i < W * H; i++) if (G.road[i] && touches(a, i)) { prev[i] = -1; q.push(i); }
+  for (let h = 0; h < q.length; h++) {
+    const i = q[h];
+    if (touches(b, i)) {
+      const path = [];
+      for (let k = i; k !== -1; k = prev[k]) path.push(k);
+      return path.length >= 3 ? path.reverse() : null;
+    }
+    for (const d of bits(G.road[i])) { const n = nb(i, d); if (n >= 0 && prev[n] === -2) { prev[n] = i; q.push(n); } }
+  }
+  return null;
+}
+function spawnBus(rec) {
+  const path = roadRoute(G.places[rec.a], G.places[rec.b]);
+  if (!path) return;
+  cars.push({ ...roadMover(path), bus: rec, s: 0, dir: 1, wait: 1.5, v: BUS_SPEED, col: rec.col, load: busLoad(G.places[rec.a]) });
+}
+const busLoad = town => clamp(Math.round(town.tiles.length * 1.2), 3, BUS_CAP);
+function buyBus(a, b) {
+  if (!G.road.some(v => v)) return fail('There are no roads here. Try a 🗺️ New map!');
+  if (!roadRoute(G.places[a], G.places[b])) return fail("Those towns aren't joined by a road. 🚌");
+  if (G.coins < COST_BUS) return fail('Not enough coins 🪙');
+  G.coins -= COST_BUS;
+  G.busN = (G.busN || 0) + 1;
+  const rec = { id: G.nextId++, n: G.busN, a, b, col: BUS_COLS[(G.busN - 1) % BUS_COLS.length], earned: 0 };
+  G.buses.push(rec); spawnBus(rec);
+  sel = { type: 'bus', id: rec.id };
+  sfx('beep'); toast(t('Beep beep! {name} is on its way! 🚌', { name: busName(rec) }));
+  return true;
+}
+const busName = rec => t('Bus {n}', { n: rec.n });
+function sellBus(rec) {
+  G.coins += Math.floor(COST_BUS / 2);
+  const car = busCar(rec);
+  if (car) { const p = posAt(car.trail, car.s); puff(p.x, p.y, 8, '#ffffff'); }
+  G.buses = G.buses.filter(b => b !== rec); cars = cars.filter(c => c !== car);
+  if (sel && sel.type === 'bus' && sel.id === rec.id) sel = null;
+}
+// Drop off the passengers on board, then pick up new ones for the trip back.
+function busStop(car, atB) {
+  const rec = car.bus, town = G.places[atB ? rec.b : rec.a];
+  if (car.load) {
+    const bonus = season().bonus === 'people' ? 2 : 1;
+    // buses need no track, so they pay less than trains do
+    const pay = Math.max(1, Math.round(car.load * CARGO.people.rate * 0.45 * (0.6 + car.len / 12) * bonus));
+    G.coins += pay; rec.earned += pay; G.stats.earned += pay;
+    G.stats.delivered.people = (G.stats.delivered.people || 0) + car.load;
+    town.growth += car.load * growthPer('people'); tryGrow(town);
+    const p = posAt(car.trail, car.s);
+    floater(p.x, p.y - 0.3, `🧒 +${pay}🪙${bonus > 1 ? ' ✨' : ''}`, '#ffd23f'); sfx('coin');
+  }
+  car.load = busLoad(town);
 }
 // Barriers drop for a moving train nearby, or for any train standing on the crossing itself.
 function gateDown(i) {
@@ -793,7 +905,11 @@ function updCars(dt) {
       const stop = car.at[k] - car.dir * 0.6;
       if ((stop - car.s) * car.dir >= -0.01 && (stop - ns) * car.dir < 0 && gateDown(i)) { ns = stop; break; }
     }
-    if (ns <= 0 || ns >= car.len) { ns = clamp(ns, 0, car.len); car.dir = -car.dir; car.wait = 1.5 + Math.random() * 2.5; }
+    if (ns <= 0 || ns >= car.len) {
+      ns = clamp(ns, 0, car.len); car.dir = -car.dir; car.wait = 1.5 + Math.random() * 2.5;
+      car.s = ns;
+      if (car.bus) { busStop(car, ns >= car.len); car.wait = 2.5; }
+    }
     car.s = ns;
   }
 }
@@ -863,13 +979,14 @@ function deliver(tr, st, l) {
   if (fac) { const m = KINDS[fac.kind].makes; fac.stock[m] = (fac.stock[m] || 0) + l.n; }
   else {
     const town = ps.find(p => p.kind === 'town');
-    if (town) { town.growth += l.type === 'people' ? l.n * 0.5 : l.n; tryGrow(town); }
+    if (town) { town.growth += l.n * growthPer(l.type); tryGrow(town); }
   }
   floater(st.x + 0.5, st.y + 0.2, `${CARGO[l.type].e} +${pay}🪙${bonus > 1 ? ' ✨' : ''}`, '#ffd23f');
   sfx('coin');
 }
 
 const growNeed = p => 8 + p.tiles.length * 2;
+const growthPer = type => type === 'people' ? 0.5 : type === 'bricks' ? 3 : 1;
 function tryGrow(p) {
   while (p.growth >= growNeed(p) && p.tiles.length < 24) {
     p.growth -= growNeed(p);
@@ -949,8 +1066,10 @@ function makeQuest() {
     const r = Math.random();
     let q;
     if (r < 0.55) {
-      const types = Object.keys(CARGO), type = types[Math.floor(Math.random() * types.length)];
-      const big = type === 'cakes' || type === 'toys';
+      // only goods this valley can actually make (older maps have no harbour or quarry)
+      const types = Object.keys(CARGO).filter(ty => G.places.some(p => KINDS[p.kind].produces.includes(ty) || KINDS[p.kind].makes === ty));
+      const type = types[Math.floor(Math.random() * types.length)];
+      const big = ['cakes', 'toys', 'sticks', 'bricks'].includes(type);
       q = { kind: 'deliver', type, n: Math.round(((big ? 8 : 15) + lvl * (big ? 2 : 4)) / 5) * 5 || 5, base: G.stats.delivered[type] || 0 };
     } else if (r < 0.75) q = { kind: 'earn', n: 100 + lvl * 40, base: G.stats.earned };
     else if (r < 0.88) q = { kind: 'trains', n: G.trains.length + 1 };
@@ -1044,6 +1163,9 @@ function sfx(name) {
     case 'err': tone(210, 0, 0.2, 'sawtooth', 0.04, 140); break;
     case 'grow': tone(660, 0, 0.1, 'sine', 0.1); tone(880, 0.1, 0.22, 'sine', 0.1); break;
     case 'fanfare': [523, 659, 784, 1047].forEach((f, k) => tone(f, k * 0.12, 0.35, 'triangle', 0.09)); break;
+    case 'honk': tone(587, 0, 0.18, 'triangle', 0.08); tone(740, 0, 0.18, 'triangle', 0.06); tone(587, 0.22, 0.3, 'triangle', 0.08); tone(740, 0.22, 0.3, 'triangle', 0.06); break;
+    case 'beep': tone(880, 0, 0.09, 'square', 0.04); tone(880, 0.13, 0.12, 'square', 0.04); break;
+    case 'quack': tone(330, 0, 0.11, 'sawtooth', 0.05, 220); tone(330, 0.15, 0.13, 'sawtooth', 0.05, 200); break;
     case 'undo': tone(700, 0, 0.12, 'sine', 0.1, 420); break;
     case 'season': [784, 659, 784, 1047].forEach((f, k) => tone(f, k * 0.1, 0.3, 'sine', 0.07)); break;
   }
@@ -1331,7 +1453,7 @@ function drawStation(c, s) {
 function drawPlace(c, p) {
   if (p.kind === 'town') { for (const i of p.tiles) drawHouse(c, tx(i), ty(i)); return; }
   const x = p.x, y = p.y;
-  const base = { orchard: '#aee07c', farm: '#aee07c', lumber: '#dcc08a', bakery: '#f6e7d2', toyshop: '#dceefa' }[p.kind];
+  const base = { orchard: '#aee07c', farm: '#aee07c', lumber: '#dcc08a', bakery: '#f6e7d2', toyshop: '#dceefa', harbour: '#f3dfa2', fishfac: '#e3f2fb', quarry: '#cfc8bb', bricks: '#f2ddd0' }[p.kind];
   rr(c, x + 0.1, y + 0.12, 1.84, 1.84, 0.25); c.fillStyle = 'rgba(0,0,0,0.12)'; c.fill();
   rr(c, x + 0.06, y + 0.06, 1.88, 1.88, 0.25); c.fillStyle = base; c.fill();
   c.strokeStyle = 'rgba(255,255,255,0.7)'; c.lineWidth = 0.05; c.stroke();
@@ -1368,13 +1490,41 @@ function drawPlace(c, p) {
       c.fillStyle = '#3f9c62'; c.beginPath(); c.moveTo(x + ox, y + oy - 0.35); c.lineTo(x + ox + 0.1, y + oy + 0.1); c.lineTo(x + ox - 0.15, y + oy + 0.15); c.closePath(); c.fill();
     }
     circle(x + 0.55, y + 0.6, 0.2, '#b98a5a'); circle(x + 0.55, y + 0.6, 0.12, '#e2b47c');
-  } else if (p.kind === 'bakery' || p.kind === 'toyshop') {
-    const wall = p.kind === 'bakery' ? '#f7a8c4' : '#6db6ef';
+  } else if (p.kind === 'harbour') {
+    // a little jetty with a sailing boat
+    c.fillStyle = '#b9824d'; c.fillRect(x + 0.2, y + 0.9, 1.6, 0.32);
+    c.strokeStyle = '#8a5a35'; c.lineWidth = 0.03; c.beginPath();
+    for (let k = 1; k < 8; k++) { c.moveTo(x + 0.2 + k * 0.2, y + 0.9); c.lineTo(x + 0.2 + k * 0.2, y + 1.22); }
+    c.stroke();
+    c.fillStyle = '#4fb4ea'; rr(c, x + 0.25, y + 1.3, 1.5, 0.55, 0.15); c.fill();
+    c.fillStyle = '#e8584f'; c.beginPath(); c.moveTo(x + 0.6, y + 1.5); c.lineTo(x + 1.3, y + 1.5); c.lineTo(x + 1.18, y + 1.72); c.lineTo(x + 0.72, y + 1.72); c.closePath(); c.fill();
+    c.fillStyle = '#ffffff'; c.beginPath(); c.moveTo(x + 0.95, y + 1.0); c.lineTo(x + 0.95, y + 1.48); c.lineTo(x + 1.25, y + 1.48); c.closePath(); c.fill();
+    for (const [ox, col] of [[0.35, '#8a5a35'], [0.7, '#4f7cac']]) { c.fillStyle = col; rr(c, x + ox, y + 0.3, 0.3, 0.35, 0.05); c.fill(); }
+    circle(x + 1.4, y + 0.5, 0.18, '#d9d4c7'); circle(x + 1.4, y + 0.5, 0.1, '#7aa6c2');
+  } else if (p.kind === 'quarry') {
+    c.fillStyle = '#a39a8c'; c.beginPath(); c.moveTo(x + 0.15, y + 0.2); c.lineTo(x + 1.85, y + 0.2); c.lineTo(x + 1.6, y + 0.85); c.lineTo(x + 0.4, y + 0.85); c.closePath(); c.fill();
+    for (const [ox, oy, r] of [[0.45, 1.3, 0.2], [0.75, 1.45, 0.16], [0.6, 1.1, 0.13], [1.5, 1.5, 0.12]]) { circle(x + ox, y + oy, r, '#8f877b'); circle(x + ox - r * 0.3, y + oy - r * 0.3, r * 0.45, '#b7b0a4'); }
+    c.fillStyle = '#e0a83e'; c.fillRect(x + 1.05, y + 1.1, 0.5, 0.3);
+    circle(x + 1.12, y + 1.45, 0.07, '#333'); circle(x + 1.48, y + 1.45, 0.07, '#333');
+    c.fillStyle = '#9da0a8'; c.fillRect(x + 1.1, y + 1.02, 0.4, 0.1);
+  } else if (p.kind === 'bakery' || p.kind === 'toyshop' || p.kind === 'fishfac' || p.kind === 'bricks') {
+    const wall = { bakery: '#f7a8c4', toyshop: '#6db6ef', fishfac: '#8fd3ff', bricks: '#d9694a' }[p.kind];
     c.fillStyle = 'rgba(0,0,0,0.15)'; c.fillRect(x + 0.32, y + 0.42, 1.5, 1.35);
     c.fillStyle = wall; c.fillRect(x + 0.25, y + 0.35, 1.5, 1.35);
-    if (p.kind === 'bakery') {
-      for (let k = 0; k < 6; k++) { c.fillStyle = k % 2 ? '#ffffff' : '#e8588f'; c.fillRect(x + 0.2 + k * 0.267, y + 0.25, 0.267, 0.45); }
+    if (p.kind === 'bakery' || p.kind === 'fishfac') {
+      const stripe = p.kind === 'bakery' ? '#e8588f' : '#2d7fc9';
+      for (let k = 0; k < 6; k++) { c.fillStyle = k % 2 ? '#ffffff' : stripe; c.fillRect(x + 0.2 + k * 0.267, y + 0.25, 0.267, 0.45); }
       c.fillStyle = '#8a5a35'; c.fillRect(x + 1.45, y + 0.05, 0.16, 0.3);
+      if (p.kind === 'fishfac') { // fish sign
+        c.fillStyle = '#ff9f43'; c.beginPath(); c.ellipse(x + 1.0, y + 0.82, 0.2, 0.09, 0, 0, 7); c.fill();
+        c.beginPath(); c.moveTo(x + 1.18, y + 0.82); c.lineTo(x + 1.32, y + 0.72); c.lineTo(x + 1.32, y + 0.92); c.closePath(); c.fill();
+      }
+    } else if (p.kind === 'bricks') {
+      c.strokeStyle = 'rgba(255,255,255,0.35)'; c.lineWidth = 0.025; c.beginPath();
+      for (let r = 0; r < 6; r++) { c.moveTo(x + 0.25, y + 0.55 + r * 0.2); c.lineTo(x + 1.75, y + 0.55 + r * 0.2); }
+      c.stroke();
+      c.fillStyle = '#7a3b2a'; c.fillRect(x + 0.2, y + 0.25, 1.6, 0.25);
+      c.fillStyle = '#8f877b'; c.fillRect(x + 1.4, y - 0.05, 0.22, 0.4); // chimney
     } else {
       const cols = ['#ff6b6b', '#ffd23f', '#3fb36b', '#9b6bd6', '#ff9f43'];
       c.fillStyle = '#3d7fc9'; c.fillRect(x + 0.2, y + 0.25, 1.6, 0.4);
@@ -1585,6 +1735,17 @@ function drawOverlay() {
   if (tool === 'train') for (const s of G.stations) {
     ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.07; ctx.beginPath(); ctx.arc(s.x + 0.5, s.y + 0.5, 0.62 + Math.sin(performance.now() / 250) * 0.05, 0, 7); ctx.stroke();
   }
+  const selBus = sel && sel.type === 'bus' && busById(sel.id), bc = selBus && busCar(selBus);
+  if (bc) {
+    ctx.strokeStyle = bc.col; ctx.lineWidth = 0.12; ctx.globalAlpha = 0.6; ctx.setLineDash([0.25, 0.18]); ctx.beginPath();
+    bc.trail.forEach((p, k) => k ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+    ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+  }
+  if (tool === 'bus') {
+    if (busDraft >= 0) outlinePlace(G.places[busDraft], '#ffd23f');
+    const hp = hover && G.occ[hover.i] >= 0 && G.places[G.occ[hover.i]];
+    if (hp && hp.kind === 'town') outlinePlace(hp, '#ffffff');
+  }
   drawDraft();
   if (!hover) return;
   const { x, y, i } = hover;
@@ -1654,10 +1815,16 @@ function drawGates() {
   }
 }
 
-function drawCar(car) {
+function carPose(car) {
   const p = posAt(car.trail, car.s), a = angAt(car.trail, car.s) + (car.dir < 0 ? Math.PI : 0);
-  const x = p.x - Math.sin(a) * 0.13, y = p.y + Math.cos(a) * 0.13; // keep to the right
-  ctx.save(); ctx.translate(x, y); ctx.rotate(a);
+  return { x: p.x - Math.sin(a) * 0.13, y: p.y + Math.cos(a) * 0.13, a }; // keep to the right
+}
+function drawCar(car) {
+  const { x, y, a } = carPose(car);
+  if (car.hop > 0) car.hop -= 1 / 60;
+  const hop = car.hop > 0 ? Math.sin(car.hop * 12) * 0.06 : 0;
+  ctx.save(); ctx.translate(x, y - Math.abs(hop)); ctx.rotate(a);
+  if (car.bus) { drawBus(car); ctx.restore(); if (car.load) emo.push(['🧒', x, y - 0.3, 0.24]); lights.push([x + Math.cos(a) * 0.6, y + Math.sin(a) * 0.6, 0.7, 0.8]); return; }
   ctx.fillStyle = 'rgba(0,0,0,0.2)'; rr(ctx, -0.15, -0.07, 0.34, 0.2, 0.06); ctx.fill();
   rr(ctx, -0.17, -0.1, 0.34, 0.2, 0.06); ctx.fillStyle = car.col; ctx.fill();
   ctx.strokeStyle = shade(car.col, -0.35); ctx.lineWidth = 0.025; ctx.stroke();
@@ -1666,6 +1833,69 @@ function drawCar(car) {
   ctx.fillStyle = '#fff3a6'; ctx.fillRect(0.15, -0.08, 0.025, 0.04); ctx.fillRect(0.15, 0.04, 0.025, 0.04);
   ctx.restore();
   lights.push([x + Math.cos(a) * 0.45, y + Math.sin(a) * 0.45, 0.55, 0.7]);
+}
+// Drawn in the bus's own frame, facing +x.
+function drawBus(car) {
+  const col = car.col;
+  ctx.fillStyle = 'rgba(0,0,0,0.2)'; rr(ctx, -0.25, -0.09, 0.54, 0.24, 0.06); ctx.fill();
+  rr(ctx, -0.28, -0.12, 0.56, 0.24, 0.06); ctx.fillStyle = col; ctx.fill();
+  ctx.strokeStyle = shade(col, -0.4); ctx.lineWidth = 0.025; ctx.stroke();
+  ctx.fillStyle = '#ffffff'; rr(ctx, -0.24, -0.08, 0.4, 0.16, 0.04); ctx.fill(); // roof
+  ctx.fillStyle = shade(col, -0.15);
+  for (let k = 0; k < 4; k++) ctx.fillRect(-0.21 + k * 0.095, -0.06, 0.06, 0.12); // roof vents/seats
+  ctx.fillStyle = '#bfe6ff'; ctx.fillRect(0.19, -0.1, 0.05, 0.2);
+  ctx.fillStyle = '#fff3a6'; ctx.fillRect(0.26, -0.1, 0.025, 0.045); ctx.fillRect(0.26, 0.055, 0.025, 0.045);
+  if (sel && sel.type === 'bus' && car.bus.id === sel.id) {
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.05; ctx.beginPath(); ctx.arc(0, 0, 0.42, 0, 7); ctx.stroke();
+  }
+}
+
+// Paint shop helpers. 'rainbow' is a special colour that isn't a hex value.
+const solid = col => col === 'rainbow' ? '#e84393' : col;
+function bodyFill(col, amt, w) {
+  if (col !== 'rainbow') return shade(col, amt);
+  const g = ctx.createLinearGradient(0, -w, 0, w);
+  ['#ff6b6b', '#ffa94d', '#ffd43b', '#69db7c', '#4dabf7', '#b197fc'].forEach((c, k) => g.addColorStop(k / 5, shade(c, amt)));
+  return g;
+}
+// Pattern over a rounded body of half-width w and half-height h (local frame).
+function drawPattern(pattern, w, h) {
+  if (!pattern || pattern === 'plain') return;
+  ctx.save(); rr(ctx, -w, -h, w * 2, h * 2, 0.06); ctx.clip();
+  if (pattern === 'stripes') {
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.fillRect(-w, -h * 0.55, w * 2, h * 0.25); ctx.fillRect(-w, h * 0.3, w * 2, h * 0.25);
+  } else if (pattern === 'spots') {
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    for (const [px, py] of [[-0.6, -0.5], [0.1, 0.45], [0.55, -0.4], [-0.25, 0.3]]) { ctx.beginPath(); ctx.arc(px * w, py * h, 0.04, 0, 7); ctx.fill(); }
+  } else if (pattern === 'stars') {
+    ctx.fillStyle = '#ffe066';
+    for (const [px, py] of [[-0.5, -0.35], [0.4, 0.4], [0.3, -0.45]]) { starPath(px * w, py * h, 0.055); ctx.fill(); }
+  }
+  ctx.restore();
+}
+function starPath(x, y, r) {
+  ctx.beginPath();
+  for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + k * Math.PI / 5, rr2 = k % 2 ? r * 0.45 : r; ctx.lineTo(x + Math.cos(a) * rr2, y + Math.sin(a) * rr2); }
+  ctx.closePath();
+}
+// A sticker face on the engine's front, kept upright so it always reads as a face.
+function drawFace(face, x, y) {
+  if (!face || face === 'none') return;
+  const r = 0.13;
+  ctx.fillStyle = '#fff4dc'; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+  ctx.strokeStyle = '#4a3426'; ctx.lineWidth = 0.02; ctx.stroke();
+  ctx.fillStyle = '#4a3426';
+  if (face === 'cool') {
+    rr(ctx, x - 0.1, y - 0.055, 0.2, 0.06, 0.02); ctx.fill();
+  } else {
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(x + s * 0.045, y - 0.03, 0.02, 0, 7); ctx.fill(); }
+  }
+  ctx.beginPath();
+  if (face === 'wow') { ctx.arc(x, y + 0.055, 0.03, 0, 7); ctx.fill(); }
+  else { ctx.lineWidth = 0.02; ctx.arc(x, y + 0.02, 0.055, 0.2, Math.PI - 0.2); ctx.stroke(); }
+  ctx.fillStyle = 'rgba(255,120,120,0.5)';
+  for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(x + s * 0.085, y + 0.03, 0.022, 0, 7); ctx.fill(); }
 }
 
 function drawWeather(glow) {
@@ -1722,6 +1952,7 @@ function drawNight(f) {
 function drawRoute(route, col, numbered) {
   const sts = route.map(stById).filter(Boolean);
   if (!sts.length) return;
+  col = solid(col);
   ctx.strokeStyle = col; ctx.lineWidth = 0.1; ctx.setLineDash([0.25, 0.18]); ctx.globalAlpha = 0.85;
   ctx.beginPath();
   sts.forEach((s, k) => k ? ctx.lineTo(s.x + 0.5, s.y + 0.5) : ctx.moveTo(s.x + 0.5, s.y + 0.5));
@@ -1744,8 +1975,8 @@ function drawTrain(tr) {
     ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(a);
     ctx.fillStyle = 'rgba(0,0,0,0.2)'; rr(ctx, -0.22, -0.13, 0.48, 0.36, 0.08); ctx.fill();
     ctx.fillStyle = '#333'; ctx.fillRect(0.2, -0.03, 0.12, 0.06);
-    rr(ctx, -0.24, -0.18, 0.48, 0.36, 0.08); ctx.fillStyle = shade(tr.color, 0.25); ctx.fill();
-    ctx.strokeStyle = shade(tr.color, -0.35); ctx.lineWidth = 0.035; ctx.stroke();
+    rr(ctx, -0.24, -0.18, 0.48, 0.36, 0.08); ctx.fillStyle = bodyFill(tr.color, 0.25, 0.18); ctx.fill();
+    ctx.strokeStyle = shade(solid(tr.color), -0.35); ctx.lineWidth = 0.035; ctx.stroke();
     rr(ctx, -0.18, -0.12, 0.36, 0.24, 0.05); ctx.fillStyle = '#fff8e8'; ctx.fill();
     ctx.restore();
     const t = types[(w - 1) * WAGON_CAP];
@@ -1756,16 +1987,19 @@ function drawTrain(tr) {
   if (!hid) lights.push([p.x + Math.cos(a) * 0.8, p.y + Math.sin(a) * 0.8, 1.1, 0.9], [p.x, p.y, 0.6, 0.5]);
   ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(a);
   ctx.fillStyle = 'rgba(0,0,0,0.2)'; rr(ctx, -0.29, -0.15, 0.64, 0.42, 0.1); ctx.fill();
-  rr(ctx, -0.32, -0.21, 0.64, 0.42, 0.12); ctx.fillStyle = tr.color; ctx.fill();
-  ctx.strokeStyle = shade(tr.color, -0.35); ctx.lineWidth = 0.035; ctx.stroke();
+  const col = solid(tr.color);
+  rr(ctx, -0.32, -0.21, 0.64, 0.42, 0.12); ctx.fillStyle = bodyFill(tr.color, 0, 0.21); ctx.fill();
+  ctx.strokeStyle = shade(col, -0.35); ctx.lineWidth = 0.035; ctx.stroke();
+  drawPattern(tr.pattern, 0.32, 0.21);
   if (eng.stripe) { ctx.fillStyle = eng.stripe; ctx.fillRect(-0.08, -0.04, 0.36, 0.08); }
-  ctx.fillStyle = shade(tr.color, -0.3); ctx.fillRect(0.0, -0.21, 0.035, 0.42);
-  rr(ctx, -0.34, -0.23, 0.24, 0.46, 0.06); ctx.fillStyle = shade(tr.color, -0.25); ctx.fill();
+  ctx.fillStyle = shade(col, -0.3); ctx.fillRect(0.0, -0.21, 0.035, 0.42);
+  rr(ctx, -0.34, -0.23, 0.24, 0.46, 0.06); ctx.fillStyle = bodyFill(tr.color, -0.25, 0.23); ctx.fill();
   ctx.fillStyle = '#bfe6ff'; ctx.fillRect(-0.29, -0.14, 0.14, 0.28);
   ctx.fillStyle = '#333'; ctx.beginPath(); ctx.arc(0.16, 0, 0.085, 0, 7); ctx.fill();
   ctx.fillStyle = '#666'; ctx.beginPath(); ctx.arc(0.16, 0, 0.045, 0, 7); ctx.fill();
   ctx.fillStyle = '#ffe066'; ctx.beginPath(); ctx.arc(0.31, 0, 0.055, 0, 7); ctx.fill();
   ctx.restore();
+  if (!hid) drawFace(tr.face, p.x + Math.cos(a) * 0.24, p.y + Math.sin(a) * 0.24);
   ctx.globalAlpha = 1;
   if (sel && sel.type === 'train' && sel.id === tr.id) {
     ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.07; ctx.beginPath(); ctx.arc(p.x, p.y, 0.5, 0, 7); ctx.stroke();
@@ -1781,7 +2015,7 @@ function toast(msg) {
 }
 
 function setTool(name) {
-  tool = name; draft = null;
+  tool = name; draft = null; busDraft = -1;
   if (name !== 'train') routeDraft = [];
   document.querySelectorAll('#tools button').forEach(b => b.classList.toggle('on', b.dataset.tool === name));
   if (name === 'train' && G.stations.length < 2) toast(t('You need two stations first! 🚉🚉'));
@@ -1797,6 +2031,7 @@ function hintText() {
   if (tool === 'station') return t('Click a straight piece of track. The station picks up from everything in the yellow square.');
   if (tool === 'remove') return t('Click things to tidy them away. You get some coins back!');
   if (tool === 'deco') return t('Pick something pretty, then click on the grass. Drag to plant lots! 🌷');
+  if (tool === 'bus') return t(busDraft < 0 ? 'Click a town to start a bus route. Buses drive on the roads 🚌' : 'Now click another town joined to it by a road!');
   let track = 0;
   for (let i = 0; i < W * H; i++) if (G.conn[i]) { track++; break; }
   if (tool === 'track' && track) return t('Drag to draw rails, then let go to build them. Rails can cross roads 🚗 and go through hills ⛰️ in tunnels.');
@@ -1820,14 +2055,26 @@ function panelHTML() {
     const route = tr.route.map(id => { const s = stById(id); return `<span class="${id === tr.target ? 'cur' : ''}">${s ? tn(s.name) : '?'}</span>`; }).join(' → ');
     const status = t(tr.state === 'lost' ? '❓ Looking for a way…' : tr.state === 'run' ? '🚂 Chugging along' : '⏳ Loading at the station');
     const sure = armed === 'sell' + tr.id;
-    return `<div class="ph"><span class="sw" style="background:${tr.color}"></span>${tn(tr.name)} <small>${tn(eng.name)}</small>${close}</div>
+    return `<div class="ph"><span class="sw" style="background:${paintCss(tr.color)}"></span>${tn(tr.name)} <small>${tn(eng.name)}</small>${close}</div>
       <div class="row">${status}</div>
       <div class="row"><b>${t('Route:')}</b> ${route}</div>
       <div class="row"><b>${t('Carrying:')}</b> ${cargoList(tot) || t('nothing yet')} <small>(${loaded(tr)}/${capacity(tr)})</small></div>
       <div class="row"><b>${t('Wagons:')}</b> ${'🚃'.repeat(tr.wagons)}</div>
       <div class="row"><b>${t('Earned:')}</b> 🪙 ${tr.earned}</div>
       <div class="btns"><button data-act="addw">${t('➕ Wagon')} ${COST.wagon}🪙</button><button data-act="remw">${t('➖ Wagon')}</button>
-      <button data-act="sell" class="${sure ? 'armed' : ''}">${t(sure ? 'Sure? 💰' : '💰 Sell')}</button></div>`;
+      <button data-act="paint" class="${paintOpen ? 'armed' : ''}">${t('🎨 Paint')}</button>
+      <button data-act="sell" class="${sure ? 'armed' : ''}">${t(sure ? 'Sure? 💰' : '💰 Sell')}</button></div>
+      ${paintOpen ? paintHTML(tr) : ''}`;
+  }
+  if (sel.type === 'bus') {
+    const rec = busById(sel.id); if (!rec) return '';
+    const car = busCar(rec), load = car ? car.load : 0, sure = armed === 'sellbus' + rec.id;
+    return `<div class="ph"><span class="sw" style="background:${rec.col}"></span>🚌 ${busName(rec)}${close}</div>
+      <div class="row">${t(car && car.wait <= 0 ? '🚌 Driving' : '🧒 At the bus stop')}</div>
+      <div class="row"><b>${t('Route:')}</b> ${tn(G.places[rec.a].name)} ⇄ ${tn(G.places[rec.b].name)}</div>
+      <div class="row"><b>${t('Carrying:')}</b> ${load ? `🧒 ${load}` : t('nothing yet')} <small>(${load}/${BUS_CAP})</small></div>
+      <div class="row"><b>${t('Earned:')}</b> 🪙 ${rec.earned}</div>
+      <div class="btns"><button data-act="sellbus" class="${sure ? 'armed' : ''}">${t(sure ? 'Sure? 💰' : '💰 Sell')}</button></div>`;
   }
   if (sel.type === 'station') {
     const s = stById(sel.id); if (!s) return '';
@@ -1853,6 +2100,19 @@ function panelHTML() {
     return html;
   }
   return '';
+}
+
+const paintCss = c => c === 'rainbow' ? 'linear-gradient(90deg,#ff6b6b,#ffd43b,#69db7c,#4dabf7,#b197fc)' : c;
+function paintHTML(tr) {
+  const btn = (act, inner, stars, on) => G.stars < stars
+    ? `<button disabled title="${t('Unlocks at {n} ⭐', { n: stars })}">🔒${stars}⭐</button>`
+    : `<button data-act="${act}" class="${on ? 'on' : ''}">${inner}</button>`;
+  const cols = PAINT_COLORS.map(p => btn('col:' + p.c, `<span class="sw" style="background:${paintCss(p.c)}"></span>`, p.stars, tr.color === p.c)).join('');
+  const pats = PATTERNS.map(p => btn('pat:' + p.id, t(p.name), p.stars, (tr.pattern || 'plain') === p.id)).join('');
+  const faces = FACES.map(f => btn('face:' + f.id, f.e, f.stars, (tr.face || 'none') === f.id)).join('');
+  return `<div class="row"><b>${t('Colour')}</b></div><div class="pal">${cols}</div>
+    <div class="row"><b>${t('Pattern')}</b></div><div class="pal">${pats}</div>
+    <div class="row"><b>${t('Face')}</b></div><div class="pal">${faces}</div>`;
 }
 
 function routeBarHTML() {
@@ -1946,6 +2206,18 @@ function panelAct(act) {
   } else if (tr && act === 'sell') {
     if (armed === 'sell' + tr.id) { armed = null; sellTrain(tr); sfx('coin'); }
     else arm('sell' + tr.id);
+  } else if (tr && act === 'paint') paintOpen = !paintOpen;
+  else if (tr && /^(col|pat|face):/.test(act)) {
+    const [k, v] = [act.slice(0, act.indexOf(':')), act.slice(act.indexOf(':') + 1)];
+    const opt = k === 'col' ? PAINT_COLORS.find(p => p.c === v) : k === 'pat' ? PATTERNS.find(p => p.id === v) : FACES.find(f => f.id === v);
+    if (opt && G.stars >= opt.stars) {
+      if (k === 'col') tr.color = v; else if (k === 'pat') tr.pattern = v; else tr.face = v;
+      const p = posAt(tr.trail, tr.d); puff(p.x, p.y, 8, solid(tr.color)); sfx('pop');
+    }
+  } else if (sel && sel.type === 'bus' && act === 'sellbus') {
+    const rec = busById(sel.id);
+    if (rec && armed === 'sellbus' + rec.id) { armed = null; sellBus(rec); sfx('coin'); }
+    else if (rec) arm('sellbus' + rec.id);
   }
   updateUI(true);
 }
@@ -1963,17 +2235,40 @@ function routeAct(act, engId) {
 function worldAt(e) { return { x: (e.clientX - view.ox) / view.s, y: (e.clientY - view.oy) / view.s }; }
 function tileAt(w) { const x = Math.floor(w.x), y = Math.floor(w.y); return inB(x, y) ? { x, y, i: idx(x, y) } : null; }
 
-function pick(w, t) {
-  let best = null, bd = 0.5;
+// Look tool: select things, and make them honk. Trains toot, cars and buses beep, ducks quack.
+function pick(w, tile) {
+  let best = null, bd = 0.5, car = null, cd = 0.4;
   for (const tr of G.trains) for (let k = 0; k <= tr.wagons; k++) {
     const p = posAt(tr.trail, tr.d - (k ? 0.6 + (k - 1) * GAP : 0)), d = Math.hypot(p.x - w.x, p.y - w.y);
     if (d < bd) { bd = d; best = tr; }
   }
-  if (best) sel = { type: 'train', id: best.id };
-  else if (t && G.stn[t.i] >= 0) sel = { type: 'station', id: G.stn[t.i] };
-  else if (t && G.occ[t.i] >= 0) sel = { type: 'place', id: G.occ[t.i] };
-  else sel = null;
-  if (sel) sfx('pop');
+  for (const c of cars) { const p = carPose(c), d = Math.hypot(p.x - w.x, p.y - w.y); if (d < cd) { cd = d; car = c; } }
+  const prev = sel && sel.type + sel.id;
+  if (best) {
+    sel = { type: 'train', id: best.id };
+    const p = posAt(best.trail, best.d);
+    sfx('honk'); puff(p.x, p.y, 10, '#ffffff'); floater(p.x, p.y - 0.4, t('Toot toot!'), '#ffffff');
+  } else if (car) {
+    sel = car.bus ? { type: 'bus', id: car.bus.id } : null;
+    const p = carPose(car);
+    car.hop = 0.5; sfx('beep'); floater(p.x, p.y - 0.3, t('Beep beep!'), '#ffffff');
+  } else if (tile && G.deco[tile.i] === DECO.pond && seasonIx() !== 3) {
+    sel = null; sfx('quack'); floater(tile.x + 0.5, tile.y + 0.2, t('Quack!'), '#ffffff');
+  } else {
+    if (tile && G.stn[tile.i] >= 0) sel = { type: 'station', id: G.stn[tile.i] };
+    else if (tile && G.occ[tile.i] >= 0) sel = { type: 'place', id: G.occ[tile.i] };
+    else sel = null;
+    if (sel) sfx('pop');
+  }
+  if (!sel || sel.type + sel.id !== prev) paintOpen = false;
+  updateUI(true);
+}
+
+function busToolClick(tile) {
+  const pid = G.occ[tile.i];
+  if (pid < 0 || G.places[pid].kind !== 'town') { toast(t('Click on a town! 🏘️')); return; }
+  if (busDraft < 0 || busDraft === pid) { busDraft = pid; sfx('pop'); }
+  else if (buyBus(busDraft, pid)) { busDraft = -1; setTool('look'); return; }
   updateUI(true);
 }
 
@@ -1997,6 +2292,7 @@ cv.addEventListener('pointerdown', e => {
   else if (tool === 'deco') { placeDeco(tile.i, draftDeco); lastTile = tile.i; }
   else if (tool === 'station') buildStation(tile.i);
   else if (tool === 'train') trainToolClick(tile);
+  else if (tool === 'bus') busToolClick(tile);
   updateUI();
 });
 cv.addEventListener('pointermove', e => {
@@ -2040,8 +2336,8 @@ $('startbtn').addEventListener('click', () => { audio(); $('welcome').hidden = t
 
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
-  const tools = ['look', 'track', 'station', 'train', 'deco', 'remove'];
-  if (e.key >= '1' && e.key <= '6') setTool(tools[+e.key - 1]);
+  const tools = ['look', 'track', 'station', 'train', 'bus', 'deco', 'remove'];
+  if (e.key >= '1' && e.key <= '7') setTool(tools[+e.key - 1]);
   else if (e.key === 'z' || e.key === 'Z') { undo(); e.preventDefault(); }
   else if (e.key === 'Escape') { if (draft) draft = null; else { sel = null; setTool('look'); } }
   else if (e.key === 'Enter' && tool === 'train') routeAct('go');
@@ -2070,8 +2366,8 @@ function save() {
       v: 1, seed: G.seed, coins: G.coins, stars: G.stars, time: G.time, nextId: G.nextId, nameIx: G.nameIx, piggyAt: G.piggyAt,
       terr: Array.from(G.terr), conn: Array.from(G.conn), road: Array.from(G.road), deco: Array.from(G.deco), roads: G.roads, places: G.places,
       stations: G.stations.map(({ id, x, y, name, cargo }) => ({ id, x, y, name, cargo })),
-      trains: G.trains.map(t => ({ id: t.id, name: t.name, color: t.color, eng: t.eng, wagons: t.wagons, route: t.route, target: t.target, load: t.load, earned: t.earned })),
-      stats: G.stats, quests: G.quests,
+      trains: G.trains.map(t => ({ id: t.id, name: t.name, color: t.color, pattern: t.pattern, face: t.face, eng: t.eng, wagons: t.wagons, route: t.route, target: t.target, load: t.load, earned: t.earned })),
+      buses: G.buses, busN: G.busN, stats: G.stats, quests: G.quests,
     }));
   } catch (e) { /* storage unavailable: the game still plays, it just won't remember */ }
 }
@@ -2085,7 +2381,8 @@ function load() {
       terr: Uint8Array.from(d.terr), conn: Uint8Array.from(d.conn),
       road: d.road ? Uint8Array.from(d.road) : new Uint8Array(W * H), deco: d.deco ? Uint8Array.from(d.deco) : new Uint8Array(W * H),
       occ: new Int16Array(W * H).fill(-1), stn: new Int32Array(W * H).fill(-1),
-      places: d.places, stations: d.stations.map(s => ({ ...s, places: [] })), trains: [], roads: d.roads || [], stats: d.stats, quests: d.quests,
+      places: d.places, stations: d.stations.map(s => ({ ...s, places: [] })), trains: [], roads: d.roads || [],
+      buses: d.buses || [], busN: d.busN || 0, stats: d.stats, quests: d.quests,
     };
     for (const p of G.places) for (const i of p.tiles) G.occ[i] = p.id;
     for (const s of G.stations) G.stn[idx(s.x, s.y)] = s.id;
@@ -2154,7 +2451,8 @@ if (/[?&]debug\b/.test(location.search)) {
   window.__game = {
     get G() { return G; }, tick, sim, draw, newGame, findPath, buyTrain, buildStation, connect, layTrack, removeTile,
     setTool, produce, idx, KINDS, CARGO, save, load, undo, beginAct, endAct, placeDeco, draftStart, draftTo, draftCommit,
-    darkness, seasonIx, gateDown, get cars() { return cars; }, get undoStack() { return undoStack; }, get draft() { return draft; },
+    darkness, seasonIx, gateDown, buyBus, sellBus, roadRoute, pick, panelAct, panelHTML, deliver, makeQuest,
+    get sel() { return sel; }, set sel(v) { sel = v; }, get cars() { return cars; }, get undoStack() { return undoStack; }, get draft() { return draft; },
   };
 }
 })();

@@ -14,12 +14,18 @@ Open `index.html` in a browser. There's no build step and no server needed.
   in its 5×5 yellow square.
 - **🚂 Train**: click stations in order, pick an engine and press **Go!** Trains load whatever another
   stop on their route wants and get paid more for longer trips.
+- **🚌 Bus** (40🪙): click a town, then another town joined to it by a road. The bus shuttles passengers
+  between them. It pays less than a train but needs no track.
 - **🌷 Decorate**: flowers, trees, fences (they join up), benches, lamp posts (they glow at night), duck
   ponds, windmills, and snowmen (winter only; they melt in spring). Drag to place lots.
-- **👆 Look**: click trains, stations, towns and industries. Add or remove wagons, or sell a train.
+- **👆 Look**: click trains, buses, stations, towns and industries. Add or remove wagons, or sell a train
+  or bus. Clicking makes things honk: trains toot, cars and buses beep, ducks quack.
+- **🎨 Paint** (in a train's panel): colours, patterns and faces. Fancier ones unlock with ⭐ stars:
+  black at 1, gold at 2, pink at 3 and rainbow at 5; stripes at 1, spots at 2 and stars at 4; the 😮 face at
+  1 and the 😎 face at 3.
 - **🧹 Remove**: removes a station first, then the track under it, then decorations and trees.
 - **↩️ Undo**: each drag or click is one step, up to 30 back. Buying a train clears the undo history.
-- Keys: `1`–`6` pick tools, `Z` undoes, `Space` pauses, `Enter` sends off a new train, `Esc` cancels.
+- Keys: `1`–`7` pick tools, `Z` undoes, `Space` pauses, `Enter` sends off a new train, `Esc` cancels.
 
 ## The valley
 - **Hills** ⛰️: trains go through them in tunnels and fade out while inside.
@@ -41,6 +47,10 @@ Open `index.html` in a browser. There's no build step and no server needed.
 | Lumber Camp | 🪵 Logs | Toy Workshop |
 | Bakery | 🧁 Cupcakes | towns |
 | Toy Workshop | 🧸 Toys | towns |
+| Harbour (by the water) | 🐟 Fish | Fish Finger Factory |
+| Fish Finger Factory | 🍤 Fish fingers | towns |
+| Quarry (by a hill) | 🪨 Stone | Brickworks |
+| Brickworks | 🧱 Bricks | towns (they grow 3× as fast) |
 
 Quests award ⭐ stars, which unlock faster engines: Dasher at 3 ⭐ and Comet at 7 ⭐. The game
 autosaves to localStorage. If you run out of money with no trains, the piggy bank helps out.

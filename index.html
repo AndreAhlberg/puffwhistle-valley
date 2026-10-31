@@ -58,6 +58,11 @@
   #panel .btns { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   #panel .btns button { flex: 1; border: 3px solid var(--line); background: #fff; border-radius: 12px; font-weight: 700; font-size: 14px; padding: 4px 6px; white-space: nowrap; }
   #panel .btns button.armed { background: #ffd0c4; border-color: var(--accent); }
+  #panel .pal { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 4px; }
+  #panel .pal button { border: 3px solid var(--line); background: #fff; border-radius: 10px; font-weight: 700; font-size: 13px; padding: 2px 6px; min-width: 30px; }
+  #panel .pal button.on { background: #ffe08a; border-color: #f2b632; }
+  #panel .pal button:disabled { opacity: .55; cursor: default; font-size: 11px; padding: 2px 3px; }
+  #panel .pal .sw { vertical-align: middle; }
   #panel .bar { height: 10px; background: #f1e6d0; border-radius: 99px; overflow: hidden; margin-top: 2px; }
   #panel .bar i { display: block; height: 100%; background: #7ed37e; }
 
@@ -132,8 +137,9 @@
     <button data-tool="track"><span class="em">🛤️</span><b data-i18n>Track</b><i>2🪙</i></button>
     <button data-tool="station"><span class="em">🚉</span><b data-i18n>Station</b><i>15🪙</i></button>
     <button data-tool="train"><span class="em">🚂</span><b data-i18n>Train</b><i>50🪙</i></button>
+    <button data-tool="bus"><span class="em">🚌</span><b data-i18n>Bus</b><i>40🪙</i></button>
     <button data-tool="deco"><span class="em">🌷</span><b data-i18n>Decorate</b><i>2🪙+</i></button>
-    <button data-tool="remove"><span class="em">🧹</span><b data-i18n>Remove</b><i>6</i></button>
+    <button data-tool="remove"><span class="em">🧹</span><b data-i18n>Remove</b><i>7</i></button>
     <button id="undo" data-i18n-title="Undo (Z)"><span class="em">↩️</span><b data-i18n>Undo</b><i>Z</i></button>
   </div>
   <div id="quests"></div>
@@ -149,7 +155,7 @@
   <div class="card">
     <div class="big">🚂🍎🧸</div>
     <h1 data-i18n>Puffwhistle Valley</h1>
-    <p data-i18n>Lay train tracks, build stations and carry people, apples, milk, logs, cupcakes and toys around the valley.</p>
+    <p data-i18n>Lay train tracks, build stations and carry people, apples, milk, fish, stone, cupcakes and toys around the valley.</p>
     <p data-i18n>Towns that get lots of deliveries grow bigger! 🏠</p>
     <button id="startbtn" data-i18n>Let's go!</button>
   </div>
