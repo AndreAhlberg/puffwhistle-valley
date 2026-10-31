@@ -3,11 +3,12 @@
 // World coordinates are in tiles; one tile = view.s CSS pixels on screen.
 (() => {
 // ---------- constants ----------
-const W = 40, H = 24;
+let W = 40, H = 24; // set per map by newGame / load
+const MAX_S = 72; // most zoomed-in: CSS pixels per tile
 const DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0]; // N E S W
 const OPP = d => (d + 2) & 3;
 const GRASS = 0, WATER = 1, TREE = 2, HILL = 3;
-const COST = { track: 2, bridge: 8, tunnel: 6, station: 15, wagon: 10 };
+const COST = { track: 2, bridge: 8, tunnel: 6, station: 15, wagon: 10, signal: 12 };
 const CATCH = 2, WAGON_CAP = 8, MAX_WAGONS = 6, GAP = 0.58, ENG_LEN = 0.62, STN_CAP = 60, PROD_EVERY = 5;
 const SEASON_LEN = 150, DAY_LEN = 120, NIGHT_DARK = 0.5, UNDO_MAX = 30;
 const SAVE_KEY = 'puffwhistle-save-v1', MUSIC_KEY = 'puffwhistle-music';
@@ -45,6 +46,56 @@ const PAINT_COLORS = [...['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6',
 const PATTERNS = [{ id: 'plain', name: 'Plain', stars: 0 }, { id: 'stripes', name: 'Stripes', stars: 1 }, { id: 'spots', name: 'Spots', stars: 2 }, { id: 'stars', name: 'Stars', stars: 4 }];
 const FACES = [{ id: 'none', e: '—', stars: 0 }, { id: 'smile', e: '🙂', stars: 0 }, { id: 'wow', e: '😮', stars: 1 }, { id: 'cool', e: '😎', stars: 3 }];
 const COST_BUS = 40, BUS_CAP = 10, BUS_SPEED = 1.5;
+// Maps. Free play has no goal; scenarios have one, rated ⭐⭐⭐/⭐⭐/⭐ by game time (par = 3-star and 2-star limits).
+// ind = how many of each industry; extra = more industries; season = locked season.
+const SCENARIOS = {
+  free:      { e: '🗺️', name: 'Free play', desc: 'A random valley. Build whatever you like!', w: 72, h: 44, towns: 7, ind: 2, hills: 7, rivers: 2, ponds: 3 },
+  islands:   { e: '🏝️', name: 'Island Hop', desc: 'Towns on little islands. Build bridges to join them up!', w: 64, h: 40, islands: 13, towns: 6, ind: 1, hills: 2, coins: 450,
+    goal: { kind: 'grow', n: 12 }, par: [900, 1500] },
+  mountains: { e: '⛰️', name: 'Mountain Railway', desc: 'Big hills everywhere. Dig tunnels and make bricks!', w: 64, h: 40, towns: 5, ind: 1, hills: 15, hillR: 1.7, rivers: 1, coins: 400,
+    extra: ['quarry', 'bricks'], goal: { kind: 'deliver', type: 'bricks', n: 60 }, par: [900, 1500] },
+  snowy:     { e: '❄️', name: 'Snowy Valley', desc: 'It is always winter. Towns need lots of milk for hot cocoa!', w: 56, h: 36, towns: 5, ind: 1, hills: 4, rivers: 1, ponds: 2, season: 3, coins: 350,
+    extra: ['farm', 'farm'], goal: { kind: 'deliver', type: 'milk', n: 120 }, par: [900, 1500] },
+  busy:      { e: '🏙️', name: 'Busy Towns', desc: 'Lots of towns and roads. Carry passengers by train and bus!', w: 72, h: 44, towns: 9, ind: 1, hills: 4, rivers: 1, ponds: 2, coins: 400,
+    goal: { kind: 'deliver', type: 'people', n: 200 }, par: [700, 1200] },
+};
+// Map sizes stretch a valley's width and height; towns, industries, hills and delivery goals scale with its area.
+const SIZES = {
+  small:  { e: '🐣', name: 'Small', k: 0.6 },
+  medium: { e: '🐥', name: 'Medium', k: 0.8 },
+  big:    { e: '🐔', name: 'Big', k: 1 },
+  huge:   { e: '🦚', name: 'Huge', k: 1.35 },
+};
+const SIZE_KEY = 'puffwhistle-size';
+// Difficulty: pay and cost multiply coins earned and building prices (not decorations); run is running costs;
+// start multiplies the starting coins, reward the quest coins, and par the time allowed for ⭐⭐⭐.
+const DIFFS = {
+  easy:   { e: '🌼', name: 'Easy', desc: 'Lots of coins and nothing to pay for running trains. Just have fun!', pay: 1, cost: 1, run: 0, start: 1, reward: 1, par: 1 },
+  normal: { e: '🚂', name: 'Normal', desc: 'Things cost more, and trains and buses cost coins to run. Plan good routes!', pay: 0.35, cost: 1.5, run: 1.5, start: 1.3, reward: 0.6, par: 1.5 },
+  tycoon: { e: '🎩', name: 'Tycoon', desc: 'For big kids and grown-ups: tight money and high running costs. Long, full trains pay best!', pay: 0.18, cost: 2, run: 3, start: 1.5, reward: 0.4, par: 2.2 },
+};
+const DIFF_KEY = 'puffwhistle-diff';
+const D = () => DIFFS[G && G.diff] || DIFFS.easy;
+const price = n => Math.round(n * D().cost);
+// running cost in coins per minute
+const trainRun = tr => D().run ? Math.round((ENG[tr.eng].cost * 0.12 + tr.wagons) * D().run) : 0;
+const busRun = () => D().run ? Math.round(COST_BUS * 0.12 * D().run) : 0;
+const RUN_EVERY = 5; // charge running costs every few game seconds
+function sized(S, size) {
+  const k = (SIZES[size] || SIZES.big).k, a = k * k, n = (v, min) => v === undefined ? v : Math.max(min, Math.round(v * a));
+  const towns = n(S.towns || 4, 3);
+  return { ...S, w: Math.round(S.w * k), h: Math.round(S.h * k), towns, ind: n(S.ind || 1, 1), hills: n(S.hills ?? 3, 1),
+    rivers: n(S.rivers, 1), ponds: n(S.ponds, 1), islands: S.islands && Math.max(towns + 2, Math.round(S.islands * a)),
+    goal: S.goal && (S.goal.kind === 'deliver' ? { ...S.goal, n: Math.max(20, Math.round(S.goal.n * a / 10) * 10) } : S.goal) };
+}
+const BEST_KEY = 'puffwhistle-best';
+const scnMemo = {};
+const scn = () => {
+  const id = SCENARIOS[G && G.scn && G.scn.id] ? G.scn.id : 'free', size = (G && G.scn && G.scn.size) || 'big', df = DIFFS[G && G.diff] ? G.diff : 'easy', k = id + ':' + size + ':' + df;
+  if (!scnMemo[k]) { const S = sized(SCENARIOS[id], size); scnMemo[k] = { ...S, par: S.par && S.par.map(v => Math.round(v * DIFFS[df].par / 30) * 30) }; }
+  return scnMemo[k];
+};
+const bestKey = (id, size, diff) => id + (size && size !== 'big' ? ':' + size : '') + (diff && diff !== 'easy' ? '@' + diff : '');
 const ENGINES = [
   { id: 'puffer', name: 'Puffer', speed: 2.2, cost: 50, stars: 0, wagons: 2, stripe: null },
   { id: 'dasher', name: 'Dasher', speed: 3.2, cost: 110, stars: 3, wagons: 3, stripe: '#ffffff' },
@@ -73,6 +124,8 @@ const TIPS = [
   'Brickworks turn 🪨 stone into 🧱 bricks. Bricks make towns grow super fast!',
   'Buses 🚌 carry passengers along the roads between towns.',
   'Click a train to make it toot! Paint it 🎨 in its panel.',
+  'Scroll or pinch to zoom. Drag the map with 👆 Look, or with two fingers.',
+  'The minimap in the corner shows the whole valley. Click it to jump there!',
 ];
 // Each season one cargo pays double. The palette repaints the valley.
 const SEASONS = [
@@ -168,7 +221,7 @@ const SV = {
   'Every train needs at least one wagon!': 'Varje tåg behöver minst en vagn!',
   'Click on a station! 🚉': 'Klicka på en station! 🚉', 'That station is already on the route.': 'Den stationen finns redan på rutten.',
   'A brand new valley! 🌄': 'En helt ny dal! 🌄', '🗺️ Sure?': '🗺️ Säker?', '🗺️ New map': '🗺️ Ny karta',
-  '🐷 Oink! Your piggy bank found 80 coins!': '🐷 Nöff! Din spargris hittade 80 mynt!',
+  '🐷 Oink! Your piggy bank found {n} coins!': '🐷 Nöff! Din spargris hittade {n} mynt!',
   'Decorate': 'Pynta', 'Undo': 'Ångra', 'Music on/off': 'Musik på/av', 'Undo (Z)': 'Ångra (Z)',
   'Spring': 'Vår', 'Summer': 'Sommar', 'Autumn': 'Höst', 'Winter': 'Vinter',
   'Spring is here! Towns are having parties: 🧁 cupcakes pay double!': 'Våren är här! Städerna har kalas: 🧁 muffins ger dubbelt betalt!',
@@ -202,7 +255,7 @@ const SV = {
   'Buses 🚌 carry passengers along the roads between towns.': 'Bussar 🚌 kör passagerare längs vägarna mellan städerna.',
   'Click a train to make it toot! Paint it 🎨 in its panel.': 'Klicka på ett tåg så tutar det! Måla det 🎨 i dess panel.',
   'Toot toot!': 'Tut tut!', 'Beep beep!': 'Pip pip!', 'Quack!': 'Kvack!',
-  '🎨 Paint': '🎨 Måla', 'Colour': 'Färg', 'Pattern': 'Mönster', 'Face': 'Ansikte',
+  '🎨 Paint': '🎨 Måla', 'Rename': 'Byt namn', 'Train name': 'Tågets namn', 'Save name': 'Spara namnet', 'Colour': 'Färg', 'Pattern': 'Mönster', 'Face': 'Ansikte',
   'Plain': 'Enfärgad', 'Stripes': 'Ränder', 'Spots': 'Prickar', 'Stars': 'Stjärnor', 'Unlocks at {n} ⭐': 'Låses upp vid {n} ⭐',
   'Bus': 'Buss', 'Bus {n}': 'Buss {n}',
   'Click a town to start a bus route. Buses drive on the roads 🚌': 'Klicka på en stad för att börja en busslinje. Bussar kör på vägarna 🚌',
@@ -212,6 +265,35 @@ const SV = {
   'There are no roads here. Try a 🗺️ New map!': 'Det finns inga vägar här. Prova en 🗺️ Ny karta!',
   'Beep beep! {name} is on its way! 🚌': 'Pip pip! {name} är på väg! 🚌',
   '🚌 Driving': '🚌 Kör', '🧒 At the bus stop': '🧒 Vid hållplatsen',
+  'Pick a valley': 'Välj en dal', 'Free play': 'Fritt spel', 'A random valley. Build whatever you like!': 'En slumpad dal. Bygg vad du vill!',
+  'Island Hop': 'Öhoppet', 'Towns on little islands. Build bridges to join them up!': 'Städer på små öar. Bygg broar och koppla ihop dem!',
+  'Mountain Railway': 'Bergsbanan', 'Big hills everywhere. Dig tunnels and make bricks!': 'Stora kullar överallt. Gräv tunnlar och gör tegel!',
+  'Snowy Valley': 'Snödalen', 'It is always winter. Towns need lots of milk for hot cocoa!': 'Det är alltid vinter. Städerna behöver massor av mjölk till varm choklad!',
+  'Busy Towns': 'Myllrande städer', 'Lots of towns and roads. Carry passengers by train and bus!': 'Massor av städer och vägar. Kör passagerare med tåg och buss!',
+  'Goal:': 'Mål:', 'Best:': 'Bästa:', 'Cancel': 'Avbryt',
+  'Easy': 'Lätt', 'Normal': 'Normal', 'Tycoon': 'Tågmagnat', 'Difficulty': 'Svårighet',
+  'Lots of coins and nothing to pay for running trains. Just have fun!': 'Massor av mynt och inget att betala för att köra tåg. Bara ha kul!',
+  'Things cost more, and trains and buses cost coins to run. Plan good routes!': 'Allt kostar mer, och tåg och bussar kostar mynt att köra. Planera bra linjer!',
+  'For big kids and grown-ups: tight money and high running costs. Long, full trains pay best!': 'För stora barn och vuxna: ont om pengar och dyrt att köra. Långa, fulla tåg lönar sig bäst!',
+  'costs {n}🪙 a minute to run': 'kostar {n}🪙 i minuten att köra', 'Running costs: {n}🪙 a minute': 'Driftkostnad: {n}🪙 i minuten',
+  'Signal': 'Signal', 'Advanced': 'Avancerat', 'On': 'På', 'Off': 'Av', '🚦 Signals & crashes': '🚦 Signaler och krockar',
+  'Trains can crash into each other! Build 🚦 signals so only one train uses a piece of track at a time.': 'Tåg kan krocka med varandra! Bygg 🚦 signaler så att bara ett tåg i taget kör på en bit spår.',
+  '💥 Crash! {a} and {b} bumped into each other. Use 🚦 signals to keep trains apart!': '💥 Krock! {a} och {b} körde ihop. Använd 🚦 signaler för att hålla isär tågen!',
+  'Put signals on the track! 🛤️': 'Sätt signaler på spåret! 🛤️', 'Signals need a straight piece of track. 🚦': 'Signaler behöver en rak bit spår. 🚦',
+  "Signals can't go on a station. Put one just before it! 🚦": 'Signaler kan inte stå på en station. Sätt en precis före! 🚦',
+  "Signals can't go on a road crossing! 🚗": 'Signaler kan inte stå på en vägkorsning! 🚗', 'Signals need to be outside the tunnel! ⛰️': 'Signaler måste stå utanför tunneln! ⛰️',
+  'Signals need straight track. Take the signal away first! 🚦': 'Signaler behöver rakt spår. Ta bort signalen först! 🚦',
+  'Another train is in the way at that station! Wait until it leaves. 🚂': 'Ett annat tåg står i vägen vid stationen! Vänta tills det åker. 🚂',
+  'Click a straight piece of track for a 🚦 signal. Trains wait at a red signal until the track ahead is clear. Click it again to take it away.': 'Klicka på en rak bit spår för en 🚦 signal. Tåg väntar vid rött tills spåret framför är fritt. Klicka igen för att ta bort den.',
+  '🚦 Some trains are stuck waiting. Try a passing loop, or click the train and press ✨ Rescue.': '🚦 Några tåg har fastnat. Prova ett mötesspår, eller klicka på tåget och tryck ✨ Rädda.',
+  '🚦 Waiting at a signal': '🚦 Väntar vid en signal', '✨ Rescue': '✨ Rädda',
+  'Small': 'Liten', 'Medium': 'Mellan', 'Big': 'Stor', 'Huge': 'Jättestor', 'Map size': 'Kartans storlek',
+  '⭐⭐⭐ if done by {t}': '⭐⭐⭐ om du klarar det före {t}', 'Done in {t}!': 'Klart på {t}!',
+  'Valley complete! 🏆': 'Dalen är klar! 🏆', 'You did it in {t}!': 'Du klarade det på {t}!',
+  'Keep playing': 'Fortsätt spela', 'Pick another valley': 'Välj en annan dal',
+  'Zoom in': 'Zooma in', 'Zoom out': 'Zooma ut', 'Show the whole map': 'Visa hela kartan',
+  'Scroll or pinch to zoom. Drag the map with 👆 Look, or with two fingers.': 'Scrolla eller nyp för att zooma. Dra kartan med 👆 Titta, eller med två fingrar.',
+  'The minimap in the corner shows the whole valley. Click it to jump there!': 'Minikartan i hörnet visar hela dalen. Klicka på den för att hoppa dit!',
 };
 const NAMES_SV = {
   'Maple Town': 'Lönnstad', 'Puddleby': 'Pölby', 'Honeyhill': 'Honungsbacka', 'Pebble Cove': 'Stenviken', 'Sunnyvale': 'Soldalen',
@@ -241,8 +323,12 @@ function tn(name) {
   if (lang !== 'sv' || !name) return name;
   if (NAMES_SV[name]) return NAMES_SV[name];
   const m = /^(.*) (North|East|South|West)( \d+)?$/.exec(name);
-  return m ? `${tn(m[1])} ${SIDES_SV[m[2]]}${m[3] || ''}` : name;
+  if (m) return `${tn(m[1])} ${SIDES_SV[m[2]]}${m[3] || ''}`;
+  const num = /^(.*) (\d+)$/.exec(name); // a second "Sunny Farm 2" on a big map
+  return num ? `${tn(num[1])} ${num[2]}` : name;
 }
+const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+const NAME_MAX = 18;
 const cname = type => t(CARGO[type].name);
 
 // ---------- helpers ----------
@@ -270,7 +356,7 @@ const cache = document.createElement('canvas');
 let dpr = 1, dirty = true;
 const view = { s: 30, ox: 0, oy: 0 };
 let G = null;
-let tool = 'look', hover = null, hoverW = null, down = false, lastTile = null, sel = null, busDraft = -1, paintOpen = false;
+let tool = 'look', hover = null, hoverW = null, down = false, lastTile = null, sel = null, busDraft = -1, paintOpen = false, renaming = false;
 let routeDraft = [], draftEngine = 'puffer', speed = 1, muted = false, armed = null;
 const smoke = [], floaters = [], confetti = [], weather = [];
 let emo = [], cars = [], trainPts = [], animDeco = [], lights = [];
@@ -279,7 +365,7 @@ const undoStack = [];
 
 const stById = id => G.stations.find(s => s.id === id);
 const trById = id => G.trains.find(t => t.id === id);
-const seasonIx = () => Math.floor(G.time / SEASON_LEN) % 4;
+const seasonIx = () => scn().season ?? Math.floor(G.time / SEASON_LEN) % 4;
 const season = () => SEASONS[seasonIx()];
 // 0 by day, 1 at midnight. A day starts in the morning; dusk and dawn fade smoothly.
 function darkness() {
@@ -289,48 +375,71 @@ function darkness() {
 const dayIcon = () => { const p = (G.time % DAY_LEN) / DAY_LEN; return p < 0.6 ? '☀️' : p < 0.7 ? '🌇' : p < 0.9 ? '🌙' : '🌅'; };
 const inTunnel = p => { const x = Math.floor(p.x), y = Math.floor(p.y); return inB(x, y) && G.terr[idx(x, y)] === HILL; };
 
-function newGame(seed) {
+function newGame(seed, scnId = 'free', size = 'big', diff = 'easy', adv = false) {
+  if (!SIZES[size]) size = 'big';
+  if (!DIFFS[diff]) diff = 'easy';
+  const S = sized(SCENARIOS[scnId] || SCENARIOS.free, size);
+  W = S.w; H = S.h;
   G = {
-    v: 1, seed, coins: 250, stars: 0, time: 0, prodT: 0, nextId: 1, nameIx: 0, rr: 0, piggyAt: -999,
-    terr: new Uint8Array(W * H), conn: new Uint8Array(W * H), road: new Uint8Array(W * H), deco: new Uint8Array(W * H),
+    v: 1, seed, W, H, scn: { id: SCENARIOS[scnId] ? scnId : 'free', size, done: false }, diff, adv: !!adv, coins: Math.round((S.coins || 250) * DIFFS[diff].start / 10) * 10, runT: 0, stars: 0, time: 0, prodT: 0, nextId: 1, nameIx: 0, rr: 0, piggyAt: -999,
+    terr: new Uint8Array(W * H), conn: new Uint8Array(W * H), road: new Uint8Array(W * H), deco: new Uint8Array(W * H), sig: new Uint8Array(W * H),
     occ: new Int16Array(W * H).fill(-1), stn: new Int32Array(W * H).fill(-1),
     places: [], stations: [], trains: [], roads: [], buses: [], busN: 0, stats: { delivered: {}, earned: 0 }, quests: [],
   };
-  genMap(seed);
-  initCars(); undoStack.length = 0; curSeason = -1; draft = null;
+  genMap(seed, S);
+  initCars(); undoStack.length = 0; curSeason = -1; draft = null; view.init = false; sigDirty = true; wrecks = [];
   G.quests = [
-    { kind: 'stations', n: 2, reward: 30 },
-    { kind: 'trains', n: 1, reward: 30 },
-    { kind: 'deliver', type: 'people', n: 10, base: 0, reward: 40 },
+    { kind: 'stations', n: 2, reward: Math.round(30 * D().reward) },
+    { kind: 'trains', n: 1, reward: Math.round(30 * D().reward) },
+    { kind: 'deliver', type: 'people', n: 10, base: 0, reward: Math.round(40 * D().reward) },
   ];
   sel = null; routeDraft = []; dirty = true;
 }
 
 // ---------- map generation ----------
-function genMap(seed) {
+function genMap(seed, S = SCENARIOS.free) {
   const R = mulberry(seed), ri = (a, b) => a + Math.floor(R() * (b - a + 1));
   const set = (x, y, v) => { if (inB(x, y)) G.terr[idx(x, y)] = v; };
-  // a wiggly river from top to bottom
-  let rx = ri(14, W - 15);
-  for (let y = 0; y < H; y++) {
-    set(rx, y, WATER);
-    if (R() < 0.35) set(rx + 1, y, WATER);
-    const m = R(), nx = clamp(rx + (m < 0.3 ? -1 : m > 0.7 ? 1 : 0), 6, W - 7);
-    set(nx, y, WATER); rx = nx;
+  const area = W * H / 960; // compared with the original 40×24 valley
+  if (S.islands) {
+    // sea everywhere, then blobs of land spread apart
+    G.terr.fill(WATER);
+    const isl = [];
+    for (let tries = 0; isl.length < S.islands && tries < 2000; tries++) {
+      const cx = ri(4, W - 5), cy = ri(4, H - 5), r = 3.2 + R() * 2.6;
+      if (isl.some(o => Math.hypot(o[0] - cx, o[1] - cy) < o[2] + r + 1.5 - Math.floor(tries / 500))) continue;
+      isl.push([cx, cy, r]);
+      for (let y = Math.floor(cy - r - 1); y <= cy + r + 1; y++) for (let x = Math.floor(cx - r - 2); x <= cx + r + 2; x++)
+        if (inB(x, y) && Math.hypot((x - cx) / 1.2, y - cy) < r + (hash(x, y, seed % 97) - 0.5) * 1.2) set(x, y, GRASS);
+    }
+  } else {
+    // wiggly rivers from top to bottom, each in its own band
+    const rivers = S.rivers || 1, band = (W - 12) / rivers;
+    for (let k = 0; k < rivers; k++) {
+      let rx = ri(Math.round(6 + band * k + band * 0.25), Math.round(6 + band * k + band * 0.75));
+      for (let y = 0; y < H; y++) {
+        set(rx, y, WATER);
+        if (R() < 0.35) set(rx + 1, y, WATER);
+        const m = R(), nx = clamp(rx + (m < 0.3 ? -1 : m > 0.7 ? 1 : 0), 6, W - 7);
+        set(nx, y, WATER); rx = nx;
+      }
+    }
+    // ponds
+    for (let k = 0; k < (S.ponds || 1); k++) {
+      const px = ri(4, W - 5), py = ri(4, H - 5), pr = 1.4 + R() * 1.4;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
+        if (((x - px) / (pr * 1.4)) ** 2 + ((y - py) / pr) ** 2 <= 1) set(x, y, WATER);
+    }
   }
-  // a pond
-  const px = ri(4, W - 5), py = ri(4, H - 5), pr = 1.4 + R() * 1.4;
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
-    if (((x - px) / (pr * 1.4)) ** 2 + ((y - py) / pr) ** 2 <= 1) set(x, y, WATER);
   // hills (trains tunnel through them)
-  for (let k = 0; k < 3; k++) {
-    const cx = ri(3, W - 4), cy = ri(3, H - 4), r = 1.4 + R() * 1.2;
+  for (let k = 0; k < (S.hills ?? 3); k++) {
+    const cx = ri(3, W - 4), cy = ri(3, H - 4), r = (1.4 + R() * 1.2) * (S.hillR || 1);
     for (let y = Math.floor(cy - r - 1); y <= cy + r + 1; y++) for (let x = Math.floor(cx - r - 2); x <= cx + r + 2; x++) {
       if (inB(x, y) && Math.hypot((x - cx) / 1.25, y - cy) < r + (R() - 0.5) * 0.7 && G.terr[idx(x, y)] === GRASS) set(x, y, HILL);
     }
   }
   // forests
-  for (let k = 0; k < 8; k++) {
+  for (let k = 0; k < Math.round(8 * area); k++) {
     const cx = ri(0, W - 1), cy = ri(0, H - 1), r = 2 + R() * 2.5;
     for (let y = Math.floor(cy - r); y <= cy + r; y++) for (let x = Math.floor(cx - r); x <= cx + r; x++) {
       if (!inB(x, y)) continue;
@@ -344,7 +453,12 @@ function genMap(seed) {
   const towns = shuffle(TOWN_NAMES.slice(), R);
   const names = {};
   for (const k in KINDS) if (KINDS[k].names) names[k] = shuffle(KINDS[k].names.slice(), R);
-  const order = ['town', 'town', 'town', 'town', 'harbour', 'quarry', 'lumber', 'toyshop', 'farm', 'bakery', 'orchard', 'fishfac', 'bricks', ['orchard', 'farm', 'lumber'][ri(0, 2)]];
+  const rep = (list, n) => Array.from({ length: n }, () => list).flat();
+  const order = [
+    ...rep(['town'], S.towns || 4), ...rep(['harbour', 'quarry'], S.ind || 1),
+    ...rep(['lumber', 'toyshop', 'farm', 'bakery', 'orchard', 'fishfac', 'bricks'], S.ind || 1),
+    ...(S.extra || []), ['orchard', 'farm', 'lumber'][ri(0, 2)],
+  ];
   const near = (area, r, terr) => area.some(i => { for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const x = tx(i) + dx, y = ty(i) + dy; if (inB(x, y) && G.terr[idx(x, y)] === terr) return true; } return false; });
   for (const kind of order) {
     for (let tries = 0; tries < 800; tries++) {
@@ -362,7 +476,8 @@ function genMap(seed) {
       if (kind === 'quarry' && tries < 500 && !near(area, 2, HILL)) continue;
       const p = { id: G.places.length, kind, x, y, cx, cy, tiles: [], stock: {}, growth: 0 };
       if (isTown) {
-        p.name = towns.pop();
+        const tn0 = G.places.filter(q => q.kind === 'town').length;
+        p.name = towns[tn0 % towns.length] + (tn0 >= towns.length ? ` ${Math.floor(tn0 / towns.length) + 1}` : '');
         const cand = [];
         for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
           const xx = x + dx, yy = y + dy;
@@ -372,7 +487,8 @@ function genMap(seed) {
         p.tiles = cand.slice(0, ri(5, 7)).map(c => c[1]);
       } else {
         const list = names[kind];
-        p.name = list[(G.places.filter(q => q.kind === kind).length) % list.length];
+        const n = G.places.filter(q => q.kind === kind).length;
+        p.name = list[n % list.length] + (n >= list.length ? ` ${Math.floor(n / list.length) + 1}` : '');
         p.tiles = area;
       }
       for (const i of p.tiles) { G.occ[i] = p.id; G.terr[i] = GRASS; }
@@ -459,8 +575,11 @@ function linkCost(a, d, pend) {
     const m = G.conn[i] | (pend ? pend.get(i) || 0 : 0) | (1 << e);
     if (G.terr[i] === WATER || (r !== 5 && r !== 10) || (m & r)) return { err: 'Rails can only cross a straight road, straight across! 🚗' };
   }
+  for (const [i, e] of [[a, d], [b, OPP(d)]]) {
+    if (G.sig[i] && ((G.conn[i] | (pend ? pend.get(i) || 0 : 0) | (1 << e)) & 15) !== 5 && ((G.conn[i] | (pend ? pend.get(i) || 0 : 0) | (1 << e)) & 15) !== 10) return { err: 'Signals need straight track. Take the signal away first! 🚦' };
+  }
   const ta = G.terr[a], tb = G.terr[b];
-  return { cost: ta === WATER || tb === WATER ? COST.bridge : ta === HILL || tb === HILL ? COST.tunnel : COST.track };
+  return { cost: price(ta === WATER || tb === WATER ? COST.bridge : ta === HILL || tb === HILL ? COST.tunnel : COST.track) };
 }
 function connect(a, d) {
   const r = linkCost(a, d, null);
@@ -518,7 +637,7 @@ function draftCommit() {
 function touch() { if (act) act.changed = true; }
 function beginAct() {
   act = {
-    changed: false, coins: G.coins, terr: G.terr.slice(), conn: G.conn.slice(), deco: G.deco.slice(),
+    changed: false, coins: G.coins, terr: G.terr.slice(), conn: G.conn.slice(), deco: G.deco.slice(), sig: G.sig.slice(),
     stations: G.stations.map(({ id, x, y, name, cargo }) => ({ id, x, y, name, cargo: { ...cargo } })),
     routes: G.trains.map(tr => [tr.id, tr.route.slice()]), trains: G.trains.slice(),
   };
@@ -541,7 +660,7 @@ function undo() {
   if (G.coins + a.spent < 0) { fail('Not enough coins to undo that.'); return; }
   undoStack.pop();
   G.coins += a.spent;
-  G.terr = a.terr; G.conn = a.conn; G.deco = a.deco;
+  G.terr = a.terr; G.conn = a.conn; G.deco = a.deco; G.sig = a.sig;
   // houses that grew since the action stay put
   for (const p of G.places) for (const i of p.tiles) {
     for (const d of bits(G.conn[i])) { const n = nb(i, d); if (n >= 0) G.conn[n] &= ~(1 << OPP(d)); }
@@ -552,7 +671,7 @@ function undo() {
   G.stn.fill(-1);
   for (const s of G.stations) G.stn[idx(s.x, s.y)] = s.id;
   refreshCatch();
-  for (const tr of a.lost) G.trains.push(tr);
+  for (const tr of a.lost) if (!tr.crashed) G.trains.push(tr);
   for (const [id, route] of a.routes) { const tr = trById(id); if (tr) tr.route = route; }
   for (const tr of G.trains.slice()) {
     tr.route = tr.route.filter(id => stById(id));
@@ -605,7 +724,7 @@ function buildStation(i) {
   if (G.terr[i] === WATER) return fail("Stations can't float! Pick a spot on land.");
   if (G.terr[i] === HILL) return fail('Stations need flat ground, not a hill! ⛰️');
   if (G.road[i]) return fail("Stations can't go on a road! 🚗");
-  if (G.coins < COST.station) return fail('Not enough coins 🪙');
+  if (G.coins < price(COST.station)) return fail('Not enough coins 🪙');
   const x = tx(i), y = ty(i);
   let best = null, bd = 1e9;
   for (const p of G.places) { const d = Math.hypot(p.cx - x - 0.5, p.cy - y - 0.5); if (d < bd) { bd = d; best = p; } }
@@ -617,7 +736,7 @@ function buildStation(i) {
     while (G.stations.some(s => s.name === n)) n = `${name} ${side} ${k++}`;
     name = n;
   }
-  G.coins -= COST.station;
+  G.coins -= price(COST.station);
   const st = { id: G.nextId++, x, y, name, cargo: {}, places: [] };
   G.stations.push(st); G.stn[i] = st.id;
   refreshCatch(); touch(); dirty = true; sfx('pop'); puff(x + 0.5, y + 0.5, 6, '#ffffff');
@@ -626,7 +745,8 @@ function buildStation(i) {
 
 function removeTile(i) {
   let did = false;
-  if (G.stn[i] >= 0) { removeStation(G.stn[i]); did = true; }
+  if (G.sig[i]) { G.sig[i] = 0; G.coins += Math.floor(price(COST.signal) / 2); did = true; }
+  else if (G.stn[i] >= 0) { removeStation(G.stn[i]); did = true; }
   else if (G.conn[i]) {
     for (const d of bits(G.conn[i])) {
       const n = nb(i, d);
@@ -647,7 +767,7 @@ function removeStation(id) {
   const st = stById(id); if (!st) return;
   G.stn[idx(st.x, st.y)] = -1;
   G.stations = G.stations.filter(s => s !== st);
-  G.coins += Math.floor(COST.station / 2);
+  G.coins += Math.floor(price(COST.station) / 2);
   for (const tr of G.trains.slice()) {
     if (!tr.route.includes(id)) continue;
     tr.route = tr.route.filter(r => r !== id);
@@ -678,10 +798,12 @@ function buyTrain(route, engId) {
   const eng = ENG[engId];
   if (route.length < 2) return fail('A train needs at least two stations!');
   if (G.stars < eng.stars) { sfx('err'); toast(t('You need {n} ⭐ for the {name}.', { n: eng.stars, name: tn(eng.name) })); return false; }
-  if (G.coins < eng.cost) return fail('Not enough coins 🪙');
+  if (G.coins < price(eng.cost)) return fail('Not enough coins 🪙');
   const st = stById(route[0]);
   if (!st) return false;
-  G.coins -= eng.cost;
+  if (G.adv && G.trains.some(o => bodyPts(o).some(q => Math.hypot(q.x - st.x - 0.5, q.y - st.y - 0.5) < 1.2)))
+    return fail('Another train is in the way at that station! Wait until it leaves. 🚂');
+  G.coins -= price(eng.cost);
   undoStack.length = 0; // undo only reaches back to the last train bought
   const tr = {
     id: G.nextId++, name: TRAIN_NAMES[G.nameIx % TRAIN_NAMES.length], color: COLORS[G.nameIx % COLORS.length],
@@ -699,7 +821,7 @@ function buyTrain(route, engId) {
 
 function sellTrain(tr) {
   const eng = ENG[tr.eng];
-  G.coins += Math.floor(eng.cost / 2) + Math.max(0, tr.wagons - eng.wagons) * 5;
+  G.coins += Math.floor(price(eng.cost) / 2) + Math.max(0, tr.wagons - eng.wagons) * Math.floor(price(COST.wagon) / 2);
   const p = posAt(tr.trail, tr.d); puff(p.x, p.y, 10, '#ffffff');
   G.trains = G.trains.filter(t => t !== tr);
   if (sel && sel.type === 'train' && sel.id === tr.id) sel = null;
@@ -758,7 +880,8 @@ function arcAng(x, y, e, f) {
 }
 
 // Breadth-first search over (tile, entry edge). Trains may only turn back at dead ends.
-function findPath(s, g, inE) {
+function findPath(s, g, inE, pen, noBack) {
+  if (pen) return findPathPen(s, g, inE, pen, noBack);
   if (s === g) return null;
   const prev = new Int32Array(W * H * 4).fill(-2), how = new Int8Array(W * H * 4), q = [];
   const exits = bits(G.conn[s]);
@@ -780,7 +903,48 @@ function findPath(s, g, inE) {
       prev[kk] = k; how[kk] = x; q.push(kk);
     }
   }
-  if (found < 0) return null;
+  return found < 0 ? null : pathOf(s, g, found, prev, how);
+}
+// Shortest by cost: tiles marked in pen (taken by other trains) cost extra, so trains go round them if they can.
+// noBack: the train is already rolling, so it may not turn back where it starts.
+const PEN = 25;
+function findPathPen(s, g, inE, pen, noBack) {
+  if (s === g) return null;
+  const N = W * H * 4, prev = new Int32Array(N).fill(-2), how = new Int8Array(N), dist = new Int32Array(N).fill(1 << 30), heap = [];
+  const push = (c, k) => {
+    heap.push([c, k]);
+    for (let i = heap.length - 1; i > 0;) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; }
+  };
+  const pop = () => {
+    const top = heap[0], last = heap.pop();
+    if (heap.length) {
+      heap[0] = last;
+      for (let i = 0; ;) {
+        const l = 2 * i + 1, r = l + 1; let m = i;
+        if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
+        if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
+        if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m;
+      }
+    }
+    return top;
+  };
+  const step = (from, c, x, k0) => {
+    const n = nb(from, x); if (n < 0 || !(G.conn[n] & (1 << OPP(x)))) return;
+    const k = n * 4 + OPP(x), cc = c + 1 + (pen[n] ? PEN : 0);
+    if (cc < dist[k]) { dist[k] = cc; prev[k] = k0; how[k] = x; push(cc, k); }
+  };
+  for (const x of bits(G.conn[s])) if (!(noBack && x === inE)) step(s, 0, x, -1);
+  while (heap.length) {
+    const [c, k] = pop(); if (c > dist[k]) continue;
+    const t = k >> 2, e = k & 3;
+    if (t === g) return pathOf(s, g, k, prev, how);
+    let ex = bits(G.conn[t]).filter(d => d !== e);
+    if (!ex.length) ex = [e];
+    for (const x of ex) step(t, c, x, k);
+  }
+  return null;
+}
+function pathOf(s, g, found, prev, how) {
   const chain = [];
   for (let k = found; k !== -1; k = prev[k]) chain.push(k);
   chain.reverse();
@@ -801,6 +965,150 @@ function turnPts(pts, t, e, x) {
     const [ox, oy] = cornerOf(tx(t), ty(t), e, x), [a0, da] = arcAng(tx(t), ty(t), e, x);
     for (let j = 1; j <= 6; j++) { const a = a0 + da * j / 6; pts.push([ox + Math.cos(a) * 0.5, oy + Math.sin(a) * 0.5]); }
   }
+}
+
+// ---------- advanced mode: signals and crashes ----------
+// Path signals: as a train reaches a signal it books every tile of its way up to the next signal (or its
+// station). If any of those tiles is taken it waits there, and now and then looks for another way round,
+// such as the free side of a passing loop. Track without signals is unprotected: trains there can crash.
+const ADV_KEY = 'puffwhistle-adv';
+const GHOST_T = 8; // seconds a loaded or rescued train passes through others, so it can get clear
+const CRASH_R = 0.4, SIG_LOOK = 1.6, REROUTE_EVERY = 1;
+let sigList = [], sigDirty = true, taken = new Int32Array(0), wrecks = [];
+const tileOfPt = q => idx(clamp(Math.floor(q.x), 0, W - 1), clamp(Math.floor(q.y), 0, H - 1));
+function bodyPts(tr) {
+  const out = [], L = trainLen(tr);
+  for (let s = tr.d; s >= tr.d - L - 0.01; s -= 0.25) out.push(posAt(tr.trail, s));
+  return out;
+}
+// Who holds each tile: the train standing on it, or the train that booked it (train id; 0 = free).
+function updTaken() {
+  if (sigDirty) { sigList = []; for (let i = 0; i < W * H; i++) if (G.sig[i]) sigList.push(i); sigDirty = false; }
+  if (taken.length !== W * H) taken = new Int32Array(W * H); else taken.fill(0);
+  for (const tr of G.trains) {
+    const body = new Set(bodyPts(tr).map(tileOfPt));
+    if (tr.resPath) {
+      // let go of booked tiles the whole train has already passed
+      const first = tr.resPath.findIndex(i => body.has(i));
+      if (first > 0) tr.resPath = tr.resPath.slice(first);
+      for (const i of tr.resPath) taken[i] = tr.id;
+    }
+    for (const i of body) taken[i] = tr.id;
+  }
+}
+const freeFor = (i, tr) => !taken[i] || taken[i] === tr.id;
+function claim(tr, path) { tr.resPath = path; for (const i of path) taken[i] = tr.id; }
+// The tiles a train will cross from trail distance s0 (on tile first), up to the next signal or its station.
+function tilesAhead(tr, s0, first) {
+  const out = [first], end = trailEnd(tr);
+  for (let s = s0 + 0.1; s < end + 0.1; s += 0.1) {
+    const i = tileOfPt(posAt(tr.trail, Math.min(s, end)));
+    if (i === out[out.length - 1]) continue;
+    if (G.sig[i]) break;
+    out.push(i);
+  }
+  return out;
+}
+// How far the head may move this step: up to want, or to just before a signal it can't book past yet.
+function sigLimit(tr, want) {
+  const end = Math.min(trailEnd(tr), want + SIG_LOOK);
+  let prev = tileOfPt(posAt(tr.trail, tr.d));
+  for (let s = tr.d + 0.1; s <= end; s += 0.1) {
+    const i = tileOfPt(posAt(tr.trail, s));
+    if (i === prev) continue;
+    const from = prev; prev = i;
+    if (!G.sig[i]) continue;
+    if (tr.resPath && tr.resPath[0] === i) continue; // already booked through this one
+    if (s > want + 0.45) break; // not there yet
+    if (book(tr, i, from, s)) continue;
+    return Math.max(tr.d, Math.min(want, s - 0.35));
+  }
+  return want;
+}
+// At each signal the train plans its way on afresh, steering round track other trains hold (so two trains
+// pick different sides of a passing loop), then books it up to the next signal.
+function book(tr, sigTile, from, sEntry) {
+  if (tr.leg && (tr.planSig !== sigTile || (tr.rerouteAt || 0) <= G.time)) {
+    tr.planSig = sigTile; tr.rerouteAt = G.time + REROUTE_EVERY;
+    const pen = new Uint8Array(W * H);
+    for (let i = 0; i < W * H; i++) if (!freeFor(i, tr)) pen[i] = 1;
+    const p = findPath(sigTile, tr.leg.goal, OPP(dirTo(from, sigTile)), pen, true);
+    const np = [];
+    if (p) for (const i of p.tiles) { if (np.length && G.sig[i]) break; np.push(i); }
+    if (p && np.every(i => freeFor(i, tr))) {
+      // keep the trail up to where the train enters the signal, then follow the new way
+      const keep = tr.trail.filter(q => q.s <= sEntry + 1e-9).map(q => [q.x, q.y]);
+      tr.trail = mkTrail(keep.concat(p.pts));
+      tr.leg = { ...p, tiles: [...new Set([...tr.leg.tiles, ...p.tiles])] };
+      claim(tr, np);
+      return true;
+    }
+  }
+  const path = tilesAhead(tr, sEntry, sigTile);
+  if (path.every(i => freeFor(i, tr))) { claim(tr, path); return true; }
+  return false;
+}
+function checkCrashes() {
+  const live = G.trains.filter(tr => !(tr.ghost > 0) && tr.trail);
+  const pts = new Map(live.map(tr => [tr, bodyPts(tr)]));
+  for (let a = 0; a < live.length; a++) for (let b = a + 1; b < live.length; b++) {
+    const A = live[a], B = live[b];
+    if (A.state !== 'run' && B.state !== 'run') continue;
+    const hit = (X, Y) => { const h = pts.get(X)[0]; return pts.get(Y).some(q => Math.hypot(q.x - h.x, q.y - h.y) < CRASH_R); };
+    if (hit(A, B) || hit(B, A)) { crash(A, B); return; }
+  }
+}
+function crash(a, b) {
+  const p = posAt(a.trail, a.d);
+  for (const tr of [a, b]) {
+    tr.crashed = true;
+    for (const q of bodyPts(tr)) puff(q.x, q.y, 5, '#9aa0a6');
+    if (sel && sel.type === 'train' && sel.id === tr.id) sel = null;
+  }
+  puff(p.x, p.y, 24, '#ffb347');
+  wrecks.push({ x: p.x, y: p.y, t: 0 });
+  G.trains = G.trains.filter(tr => tr !== a && tr !== b);
+  G.stats.crashes = (G.stats.crashes || 0) + 1;
+  sfx('crash');
+  toast(t('💥 Crash! {a} and {b} bumped into each other. Use 🚦 signals to keep trains apart!', { a: tn(a.name), b: tn(b.name) }));
+}
+function updWrecks(dt) { for (const w of wrecks) w.t += dt; wrecks = wrecks.filter(w => w.t < 3); }
+function toggleSignal(i) {
+  if (G.sig[i]) {
+    G.sig[i] = 0; G.coins += Math.floor(price(COST.signal) / 2);
+    touch(); dirty = true; sfx('build'); puff(tx(i) + 0.5, ty(i) + 0.5, 5, '#d9c7a8'); return true;
+  }
+  const c = G.conn[i];
+  if (!c) return fail('Put signals on the track! 🛤️');
+  if (c !== 5 && c !== 10) return fail('Signals need a straight piece of track. 🚦');
+  if (G.stn[i] >= 0) return fail("Signals can't go on a station. Put one just before it! 🚦");
+  if (G.road[i]) return fail("Signals can't go on a road crossing! 🚗");
+  if (G.terr[i] === HILL) return fail('Signals need to be outside the tunnel! ⛰️');
+  if (G.coins < price(COST.signal)) return fail('Not enough coins 🪙');
+  G.coins -= price(COST.signal); G.sig[i] = 1;
+  touch(); dirty = true; sfx('pop'); puff(tx(i) + 0.5, ty(i) + 0.5, 5, '#ffffff');
+  return true;
+}
+// A train that has waited a long time can be lifted back to its station.
+function rescueTrain(tr) { resetTrain(tr); tr.ghost = GHOST_T; tr.sigWait = 0; tr.resPath = null; sfx('pop'); }
+function drawSignals() {
+  if (!G.adv) return;
+  if (sigDirty || taken.length !== W * H) updTaken();
+  for (const i of sigList) {
+    const x = tx(i) + 0.5, y = ty(i) + 0.5, vert = (G.conn[i] & 5) === 5;
+    // a lamp facing each way: green if the track on that side is free
+    const sides = vert ? [0, 2] : [3, 1], px = vert ? 0.38 : 0, py = vert ? 0 : -0.38;
+    ctx.fillStyle = 'rgba(0,0,0,0.2)'; rr(ctx, x + px - (vert ? 0.12 : 0.27) + 0.03, y + py - (vert ? 0.27 : 0.12) + 0.04, vert ? 0.24 : 0.54, vert ? 0.54 : 0.24, 0.09); ctx.fill();
+    rr(ctx, x + px - (vert ? 0.12 : 0.27), y + py - (vert ? 0.27 : 0.12), vert ? 0.24 : 0.54, vert ? 0.54 : 0.24, 0.09);
+    ctx.fillStyle = '#2d3138'; ctx.fill(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.03; ctx.stroke();
+    for (const d of sides) {
+      const n = nb(i, d), busy = taken[i] || (n >= 0 && taken[n]);
+      const lx = x + px + DX[d] * 0.13, ly = y + py + DY[d] * 0.13;
+      ctx.fillStyle = busy ? '#ff3b30' : '#2ecc71'; ctx.beginPath(); ctx.arc(lx, ly, 0.08, 0, 7); ctx.fill();
+      lights.push([lx, ly, 0.35, 0.5]);
+    }
+  }
+  for (const w of wrecks) emo.push(['💥', w.x, w.y - w.t * 0.2, 0.9 - w.t * 0.2]);
 }
 
 // ---------- cars ----------
@@ -857,8 +1165,8 @@ const busLoad = town => clamp(Math.round(town.tiles.length * 1.2), 3, BUS_CAP);
 function buyBus(a, b) {
   if (!G.road.some(v => v)) return fail('There are no roads here. Try a 🗺️ New map!');
   if (!roadRoute(G.places[a], G.places[b])) return fail("Those towns aren't joined by a road. 🚌");
-  if (G.coins < COST_BUS) return fail('Not enough coins 🪙');
-  G.coins -= COST_BUS;
+  if (G.coins < price(COST_BUS)) return fail('Not enough coins 🪙');
+  G.coins -= price(COST_BUS);
   G.busN = (G.busN || 0) + 1;
   const rec = { id: G.nextId++, n: G.busN, a, b, col: BUS_COLS[(G.busN - 1) % BUS_COLS.length], earned: 0 };
   G.buses.push(rec); spawnBus(rec);
@@ -868,7 +1176,7 @@ function buyBus(a, b) {
 }
 const busName = rec => t('Bus {n}', { n: rec.n });
 function sellBus(rec) {
-  G.coins += Math.floor(COST_BUS / 2);
+  G.coins += Math.floor(price(COST_BUS) / 2);
   const car = busCar(rec);
   if (car) { const p = posAt(car.trail, car.s); puff(p.x, p.y, 8, '#ffffff'); }
   G.buses = G.buses.filter(b => b !== rec); cars = cars.filter(c => c !== car);
@@ -880,7 +1188,7 @@ function busStop(car, atB) {
   if (car.load) {
     const bonus = season().bonus === 'people' ? 2 : 1;
     // buses need no track, so they pay less than trains do
-    const pay = Math.max(1, Math.round(car.load * CARGO.people.rate * 0.45 * (0.6 + car.len / 12) * bonus));
+    const pay = Math.max(1, Math.round(car.load * CARGO.people.rate * 0.45 * (0.6 + car.len / 12) * bonus * D().pay));
     G.coins += pay; rec.earned += pay; G.stats.earned += pay;
     G.stats.delivered.people = (G.stats.delivered.people || 0) + car.load;
     town.growth += car.load * growthPer('people'); tryGrow(town);
@@ -918,8 +1226,15 @@ function depart(tr) {
   const n = tr.route.length; if (n < 2) return;
   const nextId = tr.route[(tr.route.indexOf(tr.target) + 1) % n];
   const st = stById(nextId);
-  const p = st && findPath(tr.atTile, idx(st.x, st.y), tr.inE);
+  let pen = null;
+  if (st && G.adv) {
+    updTaken();
+    pen = new Uint8Array(W * H);
+    for (let i = 0; i < W * H; i++) if (!freeFor(i, tr)) pen[i] = 1;
+  }
+  const p = st && findPath(tr.atTile, idx(st.x, st.y), tr.inE, pen);
   if (!p) { tr.state = 'lost'; tr.timer = 2; return; }
+  tr.resPath = null; tr.planSig = -1;
   tr.target = nextId; tr.leg = p; tr.state = 'run';
   const L = trainLen(tr);
   if (tr.inE >= 0 && p.x0 === OPP(tr.inE)) {
@@ -971,7 +1286,7 @@ function deliver(tr, st, l) {
   const from = stById(l.from);
   const dist = from ? Math.abs(from.x - st.x) + Math.abs(from.y - st.y) : 6;
   const bonus = season().bonus === l.type ? 2 : 1;
-  const pay = Math.max(1, Math.round(l.n * CARGO[l.type].rate * (0.6 + dist / 10) * bonus));
+  const pay = Math.max(1, Math.round(l.n * CARGO[l.type].rate * (0.6 + dist / 10) * bonus * D().pay));
   G.coins += pay; tr.earned += pay; G.stats.earned += pay;
   G.stats.delivered[l.type] = (G.stats.delivered[l.type] || 0) + l.n;
   const ps = st.places.map(id => G.places[id]).filter(p => KINDS[p.kind].accepts.includes(l.type));
@@ -1028,7 +1343,9 @@ function produce() {
 
 function updTrain(tr, dt) {
   if (tr.state !== 'run') { tr.timer -= dt; if (tr.timer <= 0) depart(tr); return; }
-  tr.d += ENG[tr.eng].speed * dt;
+  const want = tr.d + ENG[tr.eng].speed * dt;
+  tr.d = G.adv ? sigLimit(tr, want) : want;
+  tr.sigWait = tr.d < want - 1e-6 ? (tr.sigWait || 0) + dt : 0;
   tr.smokeT -= dt;
   if (tr.smokeT <= 0 && !inTunnel(posAt(tr.trail, tr.d))) {
     tr.smokeT = 0.13;
@@ -1069,16 +1386,17 @@ function makeQuest() {
       // only goods this valley can actually make (older maps have no harbour or quarry)
       const types = Object.keys(CARGO).filter(ty => G.places.some(p => KINDS[p.kind].produces.includes(ty) || KINDS[p.kind].makes === ty));
       const type = types[Math.floor(Math.random() * types.length)];
+      if (!type) continue;
       const big = ['cakes', 'toys', 'sticks', 'bricks'].includes(type);
       q = { kind: 'deliver', type, n: Math.round(((big ? 8 : 15) + lvl * (big ? 2 : 4)) / 5) * 5 || 5, base: G.stats.delivered[type] || 0 };
-    } else if (r < 0.75) q = { kind: 'earn', n: 100 + lvl * 40, base: G.stats.earned };
+    } else if (r < 0.75) q = { kind: 'earn', n: Math.round((100 + lvl * 40) * D().pay / 10) * 10, base: G.stats.earned };
     else if (r < 0.88) q = { kind: 'trains', n: G.trains.length + 1 };
     else q = { kind: 'grow', n: maxHouses() + 2 };
     if (G.quests.some(o => o.kind === q.kind && o.type === q.type)) continue;
-    q.reward = 30 + lvl * 10;
+    q.reward = Math.round((30 + lvl * 10) * D().reward);
     return q;
   }
-  return { kind: 'earn', n: 100 + lvl * 40, base: G.stats.earned, reward: 30 + lvl * 10 };
+  return { kind: 'earn', n: Math.round((100 + lvl * 40) * D().pay / 10) * 10, base: G.stats.earned, reward: Math.round((30 + lvl * 10) * D().reward) };
 }
 function checkQuests() {
   for (let k = 0; k < G.quests.length; k++) {
@@ -1126,7 +1444,9 @@ function flake(kind, anywhere) {
 function updWeather(dt) {
   const s = seasonIx(), kind = WEATHER[s];
   prune(weather, w => w.kind === kind);
-  while (weather.length < WEATHER_N[s]) weather.push(flake(kind, true));
+  const want = Math.round(WEATHER_N[s] * W * H / 960);
+  if (weather.length > want) weather.length = want;
+  while (weather.length < want) weather.push(flake(kind, true));
   for (const w of weather) {
     w.t += dt; w.a += dt * 2;
     w.x += (w.vx + Math.sin(w.t * w.f) * w.sw) * dt; w.y += (w.vy + (w.kind === 'fly' ? Math.cos(w.t * w.f * 1.3) * 0.3 : 0)) * dt;
@@ -1167,6 +1487,11 @@ function sfx(name) {
     case 'beep': tone(880, 0, 0.09, 'square', 0.04); tone(880, 0.13, 0.12, 'square', 0.04); break;
     case 'quack': tone(330, 0, 0.11, 'sawtooth', 0.05, 220); tone(330, 0.15, 0.13, 'sawtooth', 0.05, 200); break;
     case 'undo': tone(700, 0, 0.12, 'sine', 0.1, 420); break;
+    case 'crash': {
+      tone(140, 0, 0.5, 'sawtooth', 0.09, 50); tone(90, 0.05, 0.6, 'square', 0.06, 40);
+      [1200, 900, 1500].forEach((f, k) => tone(f, 0.08 + k * 0.07, 0.12, 'triangle', 0.04, f * 0.6));
+      break;
+    }
     case 'season': [784, 659, 784, 1047].forEach((f, k) => tone(f, k * 0.1, 0.3, 'sine', 0.07)); break;
   }
 }
@@ -1249,9 +1574,17 @@ function music() {
 }
 
 // ---------- rendering: static map cache ----------
+// The static map is cached at one of a few fixed sharpness levels and scaled when drawn,
+// so zooming only re-renders when it crosses a level. Big maps are capped to keep memory sane.
+let cacheK = 0;
+function wantCacheK() {
+  const want = view.s * dpr, cap = Math.min(64, 6144 / W, 6144 / H);
+  for (const b of [12, 16, 24, 32, 48, 64]) if (b >= want) return Math.min(b, cap);
+  return cap;
+}
 function renderCache() {
-  dirty = false;
-  const k = view.s * dpr;
+  dirty = false; sigDirty = true;
+  const k = cacheK = wantCacheK();
   cache.width = Math.ceil(W * k); cache.height = Math.ceil(H * k);
   const c = cache.getContext('2d');
   c.setTransform(k, 0, 0, k, 0, 0);
@@ -1280,6 +1613,37 @@ function renderCache() {
     c.fillText(KINDS[p.kind].e, bx * k, by * k + 0.03 * k);
     c.restore();
   }
+  renderMini();
+}
+
+// ---------- minimap ----------
+// One small block per tile; the frame for the view and dots for trains are drawn on top each frame.
+const miniImg = document.createElement('canvas'), mini = $('mini');
+let miniPx = 3;
+function renderMini() {
+  miniPx = Math.max(2, Math.min(4, Math.floor(200 / W)));
+  miniImg.width = W * miniPx; miniImg.height = H * miniPx;
+  const c = miniImg.getContext('2d'), P = PAL[seasonIx()];
+  for (let i = 0; i < W * H; i++) {
+    const tr = G.terr[i];
+    c.fillStyle = G.occ[i] >= 0 ? (G.places[G.occ[i]].kind === 'town' ? '#e8584f' : '#ff9f43')
+      : G.stn[i] >= 0 ? '#ffd23f' : G.conn[i] ? '#6b4a2f' : G.road[i] ? '#8d9098'
+      : tr === WATER ? P.water : tr === HILL ? shade(P.hill, -0.15) : tr === TREE ? (P.leaf ? P.leaf[0] : '#c9772e') : P.g[0];
+    c.fillRect(tx(i) * miniPx, ty(i) * miniPx, miniPx, miniPx);
+  }
+  mini.width = miniImg.width * dpr; mini.height = miniImg.height * dpr;
+  mini.style.width = miniImg.width + 'px'; mini.style.height = miniImg.height + 'px';
+}
+function drawMini() {
+  const c = mini.getContext('2d');
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.drawImage(miniImg, 0, 0);
+  c.fillStyle = '#ffffff';
+  for (const tr of G.trains) { const p = posAt(tr.trail, tr.d); c.fillRect(p.x * miniPx - 1.5, p.y * miniPx - 1.5, 3, 3); }
+  const top = viewArea.top, bot = innerHeight - viewArea.bot;
+  const x0 = (0 - view.ox) / view.s, y0 = (top - view.oy) / view.s, x1 = (innerWidth - view.ox) / view.s, y1 = (bot - view.oy) / view.s;
+  c.strokeStyle = '#ffffff'; c.lineWidth = 2;
+  c.strokeRect(clamp(x0, 0, W) * miniPx + 1, clamp(y0, 0, H) * miniPx + 1, (clamp(x1, 0, W) - clamp(x0, 0, W)) * miniPx - 2, (clamp(y1, 0, H) - clamp(y0, 0, H)) * miniPx - 2);
 }
 
 function drawGround(c, x, y) {
@@ -1654,16 +2018,19 @@ const screenMode = () => ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 const sx = x => view.ox + x * view.s, sy = y => view.oy + y * view.s;
 
 function draw() {
-  if (dirty) renderCache();
+  if (dirty || wantCacheK() !== cacheK) renderCache();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = '#6aa84f'; ctx.fillRect(0, 0, cv.width, cv.height);
   ctx.fillStyle = 'rgba(0,0,0,0.18)';
   ctx.fillRect((view.ox + 4) * dpr, (view.oy + 6) * dpr, W * view.s * dpr, H * view.s * dpr);
-  ctx.drawImage(cache, Math.round(view.ox * dpr), Math.round(view.oy * dpr));
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(cache, view.ox * dpr, view.oy * dpr, W * view.s * dpr, H * view.s * dpr);
+  drawMini();
   emo = []; lights = [];
   worldMode();
   drawAnimDeco();
   drawGates();
+  drawSignals();
   drawOverlay();
   for (const s of G.stations) {
     const types = Object.keys(s.cargo).filter(t => s.cargo[t] > 0).sort((a, b) => s.cargo[b] - s.cargo[a]).slice(0, 3);
@@ -1966,12 +2333,12 @@ function drawRoute(route, col, numbered) {
 }
 
 function drawTrain(tr) {
-  const T = tr.trail, eng = ENG[tr.eng];
+  const T = tr.trail, eng = ENG[tr.eng], fade = G.adv && tr.ghost > 0 ? 0.45 : 1;
   const types = [];
   for (const l of tr.load) for (let k = 0; k < l.n; k++) types.push(l.type);
   for (let w = tr.wagons; w >= 1; w--) {
     const s = tr.d - 0.6 - (w - 1) * GAP, p = posAt(T, s), a = angAt(T, s), hid = inTunnel(p);
-    ctx.globalAlpha = hid ? 0.22 : 1;
+    ctx.globalAlpha = (hid ? 0.22 : 1) * fade;
     ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(a);
     ctx.fillStyle = 'rgba(0,0,0,0.2)'; rr(ctx, -0.22, -0.13, 0.48, 0.36, 0.08); ctx.fill();
     ctx.fillStyle = '#333'; ctx.fillRect(0.2, -0.03, 0.12, 0.06);
@@ -1983,7 +2350,7 @@ function drawTrain(tr) {
     if (t && !hid) emo.push([CARGO[t].e, p.x, p.y, 0.26]);
   }
   const p = posAt(T, tr.d), a = angAt(T, tr.d), hid = inTunnel(p);
-  ctx.globalAlpha = hid ? 0.22 : 1;
+  ctx.globalAlpha = (hid ? 0.22 : 1) * fade;
   if (!hid) lights.push([p.x + Math.cos(a) * 0.8, p.y + Math.sin(a) * 0.8, 1.1, 0.9], [p.x, p.y, 0.6, 0.5]);
   ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(a);
   ctx.fillStyle = 'rgba(0,0,0,0.2)'; rr(ctx, -0.29, -0.15, 0.64, 0.42, 0.1); ctx.fill();
@@ -2029,6 +2396,8 @@ function hintText() {
     return t('Add more stops if you like, then press Go! 🚂');
   }
   if (tool === 'station') return t('Click a straight piece of track. The station picks up from everything in the yellow square.');
+  if (tool === 'signal') return t('Click a straight piece of track for a 🚦 signal. Trains wait at a red signal until the track ahead is clear. Click it again to take it away.');
+  if (G.adv && G.trains.some(tr => tr.sigWait > 20)) return t('🚦 Some trains are stuck waiting. Try a passing loop, or click the train and press ✨ Rescue.');
   if (tool === 'remove') return t('Click things to tidy them away. You get some coins back!');
   if (tool === 'deco') return t('Pick something pretty, then click on the grass. Drag to plant lots! 🌷');
   if (tool === 'bus') return t(busDraft < 0 ? 'Click a town to start a bus route. Buses drive on the roads 🚌' : 'Now click another town joined to it by a road!');
@@ -2053,17 +2422,20 @@ function panelHTML() {
     const eng = ENG[tr.eng], tot = {};
     for (const l of tr.load) tot[l.type] = (tot[l.type] || 0) + l.n;
     const route = tr.route.map(id => { const s = stById(id); return `<span class="${id === tr.target ? 'cur' : ''}">${s ? tn(s.name) : '?'}</span>`; }).join(' → ');
-    const status = t(tr.state === 'lost' ? '❓ Looking for a way…' : tr.state === 'run' ? '🚂 Chugging along' : '⏳ Loading at the station');
+    const status = t(tr.state === 'lost' ? '❓ Looking for a way…' : tr.state === 'run' ? (tr.sigWait > 0.5 ? '🚦 Waiting at a signal' : '🚂 Chugging along') : '⏳ Loading at the station');
     const sure = armed === 'sell' + tr.id;
-    return `<div class="ph"><span class="sw" style="background:${paintCss(tr.color)}"></span>${tn(tr.name)} <small>${tn(eng.name)}</small>${close}</div>
+    const head = renaming
+      ? `<input id="rename" maxlength="${NAME_MAX}" value="${esc(tn(tr.name))}" aria-label="${t('Train name')}"><button data-act="nameok" title="${t('Save name')}">✔</button>`
+      : `${esc(tn(tr.name))} <button class="pen" data-act="rename" title="${t('Rename')}">✏️</button> <small>${tn(eng.name)}</small>`;
+    return `<div class="ph"><span class="sw" style="background:${paintCss(tr.color)}"></span>${head}${close}</div>
       <div class="row">${status}</div>
       <div class="row"><b>${t('Route:')}</b> ${route}</div>
       <div class="row"><b>${t('Carrying:')}</b> ${cargoList(tot) || t('nothing yet')} <small>(${loaded(tr)}/${capacity(tr)})</small></div>
       <div class="row"><b>${t('Wagons:')}</b> ${'🚃'.repeat(tr.wagons)}</div>
-      <div class="row"><b>${t('Earned:')}</b> 🪙 ${tr.earned}</div>
-      <div class="btns"><button data-act="addw">${t('➕ Wagon')} ${COST.wagon}🪙</button><button data-act="remw">${t('➖ Wagon')}</button>
+      <div class="row"><b>${t('Earned:')}</b> 🪙 ${tr.earned}${trainRun(tr) ? ` <small>· ${t('costs {n}🪙 a minute to run', { n: trainRun(tr) })}</small>` : ''}</div>
+      <div class="btns"><button data-act="addw">${t('➕ Wagon')} ${price(COST.wagon)}🪙</button><button data-act="remw">${t('➖ Wagon')}</button>
       <button data-act="paint" class="${paintOpen ? 'armed' : ''}">${t('🎨 Paint')}</button>
-      <button data-act="sell" class="${sure ? 'armed' : ''}">${t(sure ? 'Sure? 💰' : '💰 Sell')}</button></div>
+      <button data-act="sell" class="${sure ? 'armed' : ''}">${t(sure ? 'Sure? 💰' : '💰 Sell')}</button>${G.adv && tr.sigWait > 6 ? `<button data-act="rescue">${t('✨ Rescue')}</button>` : ''}</div>
       ${paintOpen ? paintHTML(tr) : ''}`;
   }
   if (sel.type === 'bus') {
@@ -2073,13 +2445,13 @@ function panelHTML() {
       <div class="row">${t(car && car.wait <= 0 ? '🚌 Driving' : '🧒 At the bus stop')}</div>
       <div class="row"><b>${t('Route:')}</b> ${tn(G.places[rec.a].name)} ⇄ ${tn(G.places[rec.b].name)}</div>
       <div class="row"><b>${t('Carrying:')}</b> ${load ? `🧒 ${load}` : t('nothing yet')} <small>(${load}/${BUS_CAP})</small></div>
-      <div class="row"><b>${t('Earned:')}</b> 🪙 ${rec.earned}</div>
+      <div class="row"><b>${t('Earned:')}</b> 🪙 ${rec.earned}${busRun() ? ` <small>· ${t('costs {n}🪙 a minute to run', { n: busRun() })}</small>` : ''}</div>
       <div class="btns"><button data-act="sellbus" class="${sure ? 'armed' : ''}">${t(sure ? 'Sure? 💰' : '💰 Sell')}</button></div>`;
   }
   if (sel.type === 'station') {
     const s = stById(sel.id); if (!s) return '';
     const near = s.places.map(id => tn(G.places[id].name)).join(', ') || t('nothing nearby');
-    const visits = G.trains.filter(tr => tr.route.includes(s.id)).map(tr => tn(tr.name)).join(', ') || t('no trains yet');
+    const visits = G.trains.filter(tr => tr.route.includes(s.id)).map(tr => esc(tn(tr.name))).join(', ') || t('no trains yet');
     return `<div class="ph">🚉 ${tn(s.name)}${close}</div>
       <div class="row"><b>${t('Waiting:')}</b> ${cargoList(s.cargo) || t('nothing')}</div>
       <div class="row"><b>${t('Sends:')}</b> ${emojis([...supplies(s)]) || '—'}</div>
@@ -2119,7 +2491,7 @@ function routeBarHTML() {
   const names = routeDraft.map(id => stById(id)).filter(Boolean).map(s => `<span>🚉 ${tn(s.name)}</span>`);
   const eng = ENGINES.map((e, n) => {
     const locked = G.stars < e.stars;
-    const info = locked ? t('needs {n} ⭐', { n: e.stars }) : `${e.cost}🪙 · ${'⚡'.repeat(n + 1)} · ${t('{n} wagons', { n: e.wagons })}`;
+    const info = locked ? t('needs {n} ⭐', { n: e.stars }) : `${price(e.cost)}🪙 · ${'⚡'.repeat(n + 1)} · ${t('{n} wagons', { n: e.wagons })}`;
     return `<button data-eng="${e.id}" class="${e.id === draftEngine ? 'on' : ''}" ${locked ? 'disabled' : ''}>${locked ? '🔒' : '🚂'} ${tn(e.name)}<small>${info}</small></button>`;
   }).join('');
   return `<div class="rt">${names.length ? names.join('<em>→</em>') : `<span class="dim">${t('Click stations on the map…')}</span>`}</div>
@@ -2163,14 +2535,21 @@ function setHTML(id, html) { if (uiCache[id] === html) return false; uiCache[id]
 function updateUI(force) {
   if (force) for (const k in uiCache) delete uiCache[k];
   $('coins').textContent = `🪙 ${G.coins}`;
+  $('coins').classList.toggle('debt', G.coins < 0);
+  const run = D().run ? G.trains.reduce((a, tr) => a + trainRun(tr), 0) + G.buses.length * busRun() : 0;
+  $('coins').title = run ? t('Running costs: {n}🪙 a minute', { n: run }) : '';
+  for (const el of document.querySelectorAll('[data-price]')) el.textContent = `${price(el.dataset.price === 'bus' ? COST_BUS : el.dataset.price === 'train' ? ENGINES[0].cost : COST[el.dataset.price])}🪙`;
+  $('diffchip').textContent = D().e + (G.adv ? '🚦' : ''); $('diffchip').title = t(D().name) + (G.adv ? ' · ' + t('🚦 Signals & crashes') : '');
+  $('sigtool').hidden = !G.adv;
   $('stars').textContent = `⭐ ${G.stars}`;
   $('hinttext').textContent = hintText();
-  setHTML('quests', G.quests.map(q => {
+  setHTML('quests', goalCard() + G.quests.map(q => {
     const pr = clamp(questProg(q), 0, q.n);
     return `<div class="q"><div class="t" title="${questText(q)}">${questText(q)}</div><div class="bar"><i style="width:${pr / q.n * 100}%"></i></div><small>${t('{p} / {n} · reward ⭐ + {r}🪙', { p: pr, n: q.n, r: q.reward })}</small></div>`;
   }).join(''));
   const ph = panelHTML();
-  $('panel').hidden = !ph; setHTML('panel', ph);
+  // keep the name box alive while typing
+  if (!(renaming && document.activeElement && document.activeElement.id === 'rename')) { $('panel').hidden = !ph; setHTML('panel', ph); }
   $('routebar').hidden = tool !== 'train';
   if (tool === 'train') setHTML('routebar', routeBarHTML());
   $('decobar').hidden = tool !== 'deco';
@@ -2182,23 +2561,29 @@ function updateUI(force) {
   document.querySelectorAll('#speed button').forEach(b => b.classList.toggle('on', +b.dataset.speed === speed));
   $('sound').textContent = muted ? '🔇' : '🔊';
   $('music').classList.toggle('off', !musicOn);
-  $('newmap').classList.toggle('armed', armed === 'newmap');
-  $('newmap').textContent = t(armed === 'newmap' ? '🗺️ Sure?' : '🗺️ New map');
+  $('newmap').textContent = t('🗺️ New map');
 }
 
 function arm(key) { armed = key; setTimeout(() => { if (armed === key) { armed = null; updateUI(true); } }, 3000); }
+
+function renameTrain(tr, name) {
+  renaming = false;
+  name = String(name || '').replace(/s+/g, ' ').trim().slice(0, NAME_MAX);
+  if (name && name !== tn(tr.name)) { tr.name = name; sfx('pop'); }
+  updateUI(true);
+}
 
 function panelAct(act) {
   const tr = sel && sel.type === 'train' && trById(sel.id);
   if (act === 'close') sel = null;
   else if (tr && act === 'addw') {
     if (tr.wagons >= MAX_WAGONS) toast(t("{name} can't pull any more wagons!", { name: tn(tr.name) }));
-    else if (G.coins < COST.wagon) fail('Not enough coins 🪙');
-    else { G.coins -= COST.wagon; tr.wagons++; sfx('pop'); }
+    else if (G.coins < price(COST.wagon)) fail('Not enough coins 🪙');
+    else { G.coins -= price(COST.wagon); tr.wagons++; sfx('pop'); }
   } else if (tr && act === 'remw') {
     if (tr.wagons <= 1) toast(t('Every train needs at least one wagon!'));
     else {
-      tr.wagons--; G.coins += 5; sfx('build');
+      tr.wagons--; G.coins += Math.floor(price(COST.wagon) / 2); sfx('build');
       let over = loaded(tr) - capacity(tr);
       for (let k = tr.load.length - 1; k >= 0 && over > 0; k--) { const m = Math.min(over, tr.load[k].n); tr.load[k].n -= m; over -= m; }
       tr.load = tr.load.filter(l => l.n > 0);
@@ -2206,7 +2591,10 @@ function panelAct(act) {
   } else if (tr && act === 'sell') {
     if (armed === 'sell' + tr.id) { armed = null; sellTrain(tr); sfx('coin'); }
     else arm('sell' + tr.id);
-  } else if (tr && act === 'paint') paintOpen = !paintOpen;
+  } else if (tr && act === 'rescue') rescueTrain(tr);
+  else if (tr && act === 'paint') paintOpen = !paintOpen;
+  else if (tr && act === 'rename') { renaming = true; updateUI(true); const i = $('rename'); i.focus(); i.select(); return; }
+  else if (tr && act === 'nameok') { renameTrain(tr, $('rename').value); return; }
   else if (tr && /^(col|pat|face):/.test(act)) {
     const [k, v] = [act.slice(0, act.indexOf(':')), act.slice(act.indexOf(':') + 1)];
     const opt = k === 'col' ? PAINT_COLORS.find(p => p.c === v) : k === 'pat' ? PATTERNS.find(p => p.id === v) : FACES.find(f => f.id === v);
@@ -2260,7 +2648,7 @@ function pick(w, tile) {
     else sel = null;
     if (sel) sfx('pop');
   }
-  if (!sel || sel.type + sel.id !== prev) paintOpen = false;
+  if (!sel || sel.type + sel.id !== prev) paintOpen = renaming = false;
   updateUI(true);
 }
 
@@ -2279,12 +2667,61 @@ function trainToolClick(tile) {
   routeDraft.push(id); sfx('pop'); updateUI(true);
 }
 
+// ---------- view: zoom and pan ----------
+// The map sits between the top and bottom bars. Fully zoomed out shows the whole valley.
+const viewArea = { top: 0, bot: 0 };
+const fitScale = () => Math.min((innerWidth - 16) / W, Math.max(100, innerHeight - viewArea.top - viewArea.bot) / H);
+const minScale = () => Math.min(fitScale(), MAX_S);
+function clampView() {
+  view.s = clamp(view.s, minScale(), MAX_S);
+  const mw = W * view.s, mh = H * view.s, top = viewArea.top, bot = innerHeight - viewArea.bot, m = 60;
+  view.ox = mw <= innerWidth ? (innerWidth - mw) / 2 : clamp(view.ox, innerWidth - mw - m, m);
+  view.oy = mh <= bot - top ? top + (bot - top - mh) / 2 : clamp(view.oy, bot - mh - m, top + m);
+}
+// Zoom so the world point under screen point (x, y) stays put.
+function zoomAt(x, y, s) {
+  const wx = (x - view.ox) / view.s, wy = (y - view.oy) / view.s;
+  view.s = clamp(s, minScale(), MAX_S);
+  view.ox = x - wx * view.s; view.oy = y - wy * view.s;
+  clampView();
+}
+function centerOn(wx, wy) {
+  view.ox = innerWidth / 2 - wx * view.s;
+  view.oy = (viewArea.top + innerHeight - viewArea.bot) / 2 - wy * view.s;
+  clampView();
+}
+const screenMid = () => [innerWidth / 2, (viewArea.top + innerHeight - viewArea.bot) / 2];
+// A new map starts zoomed in on a town, at a size small hands can tap.
+function startView() {
+  view.s = clamp(34, minScale(), MAX_S);
+  const town = G.places.find(p => p.kind === 'town');
+  if (town) centerOn(town.cx, town.cy); else centerOn(W / 2, H / 2);
+  view.init = true;
+}
+
+const ptrs = new Map();
+let pan = null, pinch = null, pinchDone = false;
+function startPinch() {
+  const [a, b] = [...ptrs.values()];
+  const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+  pinch = { d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, s0: view.s, wx: (mx - view.ox) / view.s, wy: (my - view.oy) / view.s };
+  // a second finger cancels whatever the first one started
+  if (draft) draft = null;
+  down = false; lastTile = null; pan = null; endAct();
+}
 cv.addEventListener('pointerdown', e => {
   audio();
-  if (e.button === 2) { if (draft) draft = null; else setTool('look'); return; }
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  cv.setPointerCapture(e.pointerId);
+  if (ptrs.size === 2) { startPinch(); return; }
+  if (ptrs.size > 2 || pinchDone) return;
+  // middle or right drag pans in any tool; with 👆 Look a plain drag pans too
+  if (e.button === 1 || e.button === 2 || tool === 'look') {
+    pan = { x: e.clientX, y: e.clientY, ox: view.ox, oy: view.oy, moved: false, btn: e.button };
+    return;
+  }
   const w = worldAt(e), tile = tileAt(w);
-  down = true; cv.setPointerCapture(e.pointerId);
-  if (tool === 'look') { pick(w, tile); return; }
+  down = true;
   if (!tile) return;
   beginAct();
   if (tool === 'track') draftStart(tile.i);
@@ -2293,16 +2730,42 @@ cv.addEventListener('pointerdown', e => {
   else if (tool === 'station') buildStation(tile.i);
   else if (tool === 'train') trainToolClick(tile);
   else if (tool === 'bus') busToolClick(tile);
+  else if (tool === 'signal' && G.adv) toggleSignal(tile.i);
   updateUI();
 });
 cv.addEventListener('pointermove', e => {
+  if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
   hoverW = worldAt(e); hover = tileAt(hoverW);
+  if (pinch && ptrs.size >= 2) {
+    const [a, b] = [...ptrs.values()];
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    view.s = clamp(pinch.s0 * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d0, minScale(), MAX_S);
+    view.ox = mx - pinch.wx * view.s; view.oy = my - pinch.wy * view.s;
+    clampView(); return;
+  }
+  if (pan) {
+    const dx = e.clientX - pan.x, dy = e.clientY - pan.y;
+    if (!pan.moved && Math.hypot(dx, dy) > 6) pan.moved = true;
+    if (pan.moved) { view.ox = pan.ox + dx; view.oy = pan.oy + dy; clampView(); }
+    return;
+  }
   if (!down || !hover) return;
   if (tool === 'track' && draft) draftTo(hover.i);
   else if (tool === 'remove' && hover.i !== lastTile) { removeTile(hover.i); lastTile = hover.i; }
   else if (tool === 'deco' && hover.i !== lastTile) { placeDeco(hover.i, draftDeco, true); lastTile = hover.i; }
 });
-const up = () => {
+const up = e => {
+  ptrs.delete(e.pointerId);
+  if (pinch) { if (ptrs.size < 2) { pinch = null; pinchDone = ptrs.size > 0; } return; }
+  if (pinchDone) { pinchDone = ptrs.size > 0; return; } // ignore the last finger left over from a pinch
+  if (pan) {
+    const p = pan; pan = null;
+    if (p.moved || e.type === 'pointercancel') return;
+    // a click, not a drag
+    if (p.btn === 2) { if (draft) draft = null; else setTool('look'); }
+    else if (p.btn === 0 && tool === 'look') { const w = worldAt(e); pick(w, tileAt(w)); }
+    return;
+  }
   if (down && tool === 'track') draftCommit();
   down = false; lastTile = null;
   endAct(); updateUI();
@@ -2311,6 +2774,27 @@ cv.addEventListener('pointerup', up);
 cv.addEventListener('pointercancel', up);
 cv.addEventListener('pointerleave', () => { hover = null; });
 cv.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  zoomAt(e.clientX, e.clientY, view.s * Math.pow(1.0018, -e.deltaY * (e.deltaMode === 1 ? 30 : 1)));
+}, { passive: false });
+// minimap: click or drag to jump there
+mini.addEventListener('pointerdown', e => {
+  mini.setPointerCapture(e.pointerId); mini.dragging = true;
+  const r = mini.getBoundingClientRect(); centerOn((e.clientX - r.left) / miniPx, (e.clientY - r.top) / miniPx);
+});
+mini.addEventListener('pointermove', e => {
+  if (!mini.dragging) return;
+  const r = mini.getBoundingClientRect(); centerOn((e.clientX - r.left) / miniPx, (e.clientY - r.top) / miniPx);
+});
+mini.addEventListener('pointerup', () => { mini.dragging = false; });
+$('zoombar').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const [mx, my] = screenMid();
+  if (b.dataset.z === 'in') zoomAt(mx, my, view.s * 1.4);
+  else if (b.dataset.z === 'out') zoomAt(mx, my, view.s / 1.4);
+  else { view.s = minScale(); clampView(); }
+});
 
 $('tools').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
@@ -2323,25 +2807,99 @@ $('music').addEventListener('click', () => {
   try { localStorage.setItem(MUSIC_KEY, musicOn ? 'on' : 'off'); } catch (e) { /* not remembered */ }
   updateUI();
 });
+$('panel').addEventListener('keydown', e => {
+  if (e.target.id !== 'rename') return;
+  const tr = sel && sel.type === 'train' && trById(sel.id);
+  if (e.key === 'Enter' && tr) renameTrain(tr, e.target.value);
+  else if (e.key === 'Escape') { renaming = false; updateUI(true); }
+  e.stopPropagation();
+});
+$('panel').addEventListener('focusout', e => {
+  if (e.target.id !== 'rename' || !renaming) return;
+  if (e.relatedTarget && e.relatedTarget.dataset && e.relatedTarget.dataset.act === 'nameok') return;
+  const tr = sel && sel.type === 'train' && trById(sel.id);
+  if (tr) renameTrain(tr, e.target.value); else renaming = false;
+});
 $('panel').addEventListener('click', e => { const b = e.target.closest('button'); if (b) panelAct(b.dataset.act); });
 $('routebar').addEventListener('click', e => { const b = e.target.closest('button'); if (b && !b.disabled) routeAct(b.dataset.act, b.dataset.eng); });
 $('speed').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { speed = +b.dataset.speed; updateUI(); } });
 $('sound').addEventListener('click', () => { muted = !muted; audio(); updateUI(); });
-$('newmap').addEventListener('click', () => {
-  if (armed !== 'newmap') { arm('newmap'); updateUI(); return; }
-  armed = null; newGame(Math.floor(Math.random() * 1e9)); setTool('look'); save(); toast(t('A brand new valley! 🌄'));
+// ---------- valley picker and scenario goals ----------
+function loadBest() { try { return JSON.parse(localStorage.getItem(BEST_KEY)) || {}; } catch (e) { return {}; } }
+const fmtTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const starStr = n => '⭐'.repeat(n) + '☆'.repeat(3 - n);
+let mapSize = (() => { try { return SIZES[localStorage.getItem(SIZE_KEY)] ? localStorage.getItem(SIZE_KEY) : 'big'; } catch (e) { return 'big'; } })();
+let mapAdv = (() => { try { return localStorage.getItem(ADV_KEY) === '1'; } catch (e) { return false; } })();
+let mapDiff = (() => { try { return DIFFS[localStorage.getItem(DIFF_KEY)] ? localStorage.getItem(DIFF_KEY) : 'easy'; } catch (e) { return 'easy'; } })();
+function openMaps() {
+  const best = loadBest();
+  $('mapsizes').innerHTML = Object.entries(SIZES).map(([id, z]) => {
+    const S = sized(SCENARIOS.free, id);
+    return `<button data-size="${id}" class="${id === mapSize ? 'on' : ''}"><span>${z.e}</span> ${t(z.name)} <small>${S.w}×${S.h}</small></button>`;
+  }).join('');
+  $('mapdiffs').innerHTML = Object.entries(DIFFS).map(([id, z]) => `<button data-diff="${id}" class="${id === mapDiff ? 'on' : ''}"><span>${z.e}</span> ${t(z.name)}</button>`).join('');
+  $('diffdesc').textContent = t(DIFFS[mapDiff].desc);
+  $('mapadv').innerHTML = [false, true].map(v => `<button data-adv="${v ? 1 : 0}" class="${v === mapAdv ? 'on' : ''}">${v ? '🚦 ' + t('On') : t('Off')}</button>`).join('');
+  $('advdesc').textContent = mapAdv ? t('Trains can crash into each other! Build 🚦 signals so only one train uses a piece of track at a time.') : '';
+  $('mapsgrid').innerHTML = Object.entries(SCENARIOS).map(([id, S0]) => { const S = sized(S0, mapSize), b = best[bestKey(id, mapSize, mapDiff) + (mapAdv ? '!' : '')]; return `
+    <button data-scn="${id}"><span class="big">${S.e}</span><b>${t(S.name)}</b><span>${t(S.desc)}</span>
+    ${S.goal ? `<small>${t('Goal:')} ${questText(S.goal)}${b ? `<br>${t('Best:')} ${starStr(b)}` : ''}</small>` : ''}</button>`; }).join('');
+  $('maps').hidden = false; $('scndone').hidden = true;
+}
+function startScenario(id) {
+  newGame(Math.floor(Math.random() * 1e9), id, mapSize, mapDiff, mapAdv);
+  $('maps').hidden = true;
+  setTool('look'); startView(); save();
+  toast(`${SCENARIOS[id].e} ${t(SCENARIOS[id].name)} · ${SIZES[mapSize].e} ${t(SIZES[mapSize].name)} · ${DIFFS[mapDiff].e} ${t(DIFFS[mapDiff].name)}${mapAdv ? ' · 🚦' : ''}`); sfx('toot');
+}
+const goalOf = () => scn().goal && { ...scn().goal, base: 0 };
+function checkGoal() {
+  const goal = goalOf();
+  if (!goal || G.scn.done || questProg(goal) < goal.n) return;
+  const par = scn().par, stars = G.time <= par[0] ? 3 : G.time <= par[1] ? 2 : 1;
+  G.scn.done = true; G.scn.at = G.time; G.scn.stars = stars;
+  const best = loadBest();
+  const bk = bestKey(G.scn.id, G.scn.size, G.diff) + (G.adv ? '!' : '');
+  if ((best[bk] || 0) < stars) { best[bk] = stars; try { localStorage.setItem(BEST_KEY, JSON.stringify(best)); } catch (e) { /* not remembered */ } }
+  $('donestars').textContent = starStr(stars);
+  $('donetime').textContent = t('You did it in {t}!', { t: fmtTime(G.time) });
+  $('scndone').hidden = false;
+  sfx('fanfare'); burst(); save();
+}
+function goalCard() {
+  const goal = goalOf(); if (!goal) return '';
+  const pr = clamp(questProg(goal), 0, goal.n);
+  const sub = G.scn.done ? `${starStr(G.scn.stars)} · ${t('Done in {t}!', { t: fmtTime(G.scn.at) })}` : `${pr} / ${goal.n} · ${t('⭐⭐⭐ if done by {t}', { t: fmtTime(scn().par[0]) })}`;
+  return `<div class="q goal"><div class="t">🎯 ${questText(goal)}</div><div class="bar"><i style="width:${pr / goal.n * 100}%"></i></div><small>${sub}</small></div>`;
+}
+$('newmap').addEventListener('click', openMaps);
+$('maps').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.scn) startScenario(b.dataset.scn);
+  else if (b.dataset.adv) { mapAdv = b.dataset.adv === '1'; try { localStorage.setItem(ADV_KEY, mapAdv ? '1' : '0'); } catch (e) { /* not remembered */ } sfx('pop'); openMaps(); }
+  else if (b.dataset.diff) { mapDiff = b.dataset.diff; try { localStorage.setItem(DIFF_KEY, mapDiff); } catch (e) { /* not remembered */ } sfx('pop'); openMaps(); }
+  else if (b.dataset.size) { mapSize = b.dataset.size; try { localStorage.setItem(SIZE_KEY, mapSize); } catch (e) { /* not remembered */ } sfx('pop'); openMaps(); }
+  else if (b.id === 'mapscancel') $('maps').hidden = true;
 });
+$('donekeep').addEventListener('click', () => { $('scndone').hidden = true; });
+$('donemaps').addEventListener('click', openMaps);
 $('lang').addEventListener('click', () => { setLang(lang === 'sv' ? 'en' : 'sv'); sfx('pop'); });
 $('startbtn').addEventListener('click', () => { audio(); $('welcome').hidden = true; sfx('toot'); });
 
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
-  const tools = ['look', 'track', 'station', 'train', 'bus', 'deco', 'remove'];
-  if (e.key >= '1' && e.key <= '7') setTool(tools[+e.key - 1]);
+  const tools = ['look', 'track', 'station', 'train', 'bus', 'deco', 'remove', 'signal'];
+  if (e.key >= '1' && e.key <= (G.adv ? '8' : '7')) setTool(tools[+e.key - 1]);
   else if (e.key === 'z' || e.key === 'Z') { undo(); e.preventDefault(); }
   else if (e.key === 'Escape') { if (draft) draft = null; else { sel = null; setTool('look'); } }
   else if (e.key === 'Enter' && tool === 'train') routeAct('go');
   else if (e.key === ' ') { speed = speed ? 0 : 1; updateUI(); e.preventDefault(); }
+  else if (e.key.startsWith('Arrow')) {
+    const k = { ArrowLeft: [1, 0], ArrowRight: [-1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[e.key];
+    view.ox += k[0] * 80; view.oy += k[1] * 80; clampView(); e.preventDefault();
+  } else if (e.key === '+' || e.key === '=') zoomAt(...screenMid(), view.s * 1.25);
+  else if (e.key === '-') zoomAt(...screenMid(), view.s / 1.25);
+  else if (e.key === '0') { view.s = minScale(); clampView(); }
 });
 
 function resize() {
@@ -2349,12 +2907,13 @@ function resize() {
   const w = innerWidth, h = innerHeight;
   cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
   cv.style.width = w + 'px'; cv.style.height = h + 'px';
-  const top = $('top').getBoundingClientRect().bottom + 8, bot = h - $('bottom').getBoundingClientRect().top + 8;
-  const ah = Math.max(100, h - top - bot);
-  view.s = Math.max(8, Math.min((w - 16) / W, ah / H));
-  view.ox = Math.round((w - W * view.s) / 2);
-  view.oy = Math.round(top + (ah - H * view.s) / 2);
-  $('hint').style.bottom = (bot + 4) + 'px';
+  const [mx, my] = view.init ? screenMid() : [0, 0];
+  const keep = view.init && [(mx - view.ox) / view.s, (my - view.oy) / view.s];
+  viewArea.top = $('top').getBoundingClientRect().bottom + 8;
+  viewArea.bot = h - $('bottom').getBoundingClientRect().top + 8;
+  if (keep) { view.s = clamp(view.s, minScale(), MAX_S); centerOn(...keep); } else startView();
+  $('hint').style.bottom = (viewArea.bot + 4) + 'px';
+  $('mapnav').style.bottom = (viewArea.bot + 4) + 'px';
   dirty = true;
 }
 addEventListener('resize', resize);
@@ -2363,7 +2922,7 @@ addEventListener('resize', resize);
 function save() {
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
-      v: 1, seed: G.seed, coins: G.coins, stars: G.stars, time: G.time, nextId: G.nextId, nameIx: G.nameIx, piggyAt: G.piggyAt,
+      v: 1, seed: G.seed, W, H, scn: G.scn, diff: G.diff, adv: G.adv, sig: G.adv ? Array.from(G.sig) : undefined, runT: G.runT, runAcc: G.runAcc, coins: G.coins, stars: G.stars, time: G.time, nextId: G.nextId, nameIx: G.nameIx, piggyAt: G.piggyAt,
       terr: Array.from(G.terr), conn: Array.from(G.conn), road: Array.from(G.road), deco: Array.from(G.deco), roads: G.roads, places: G.places,
       stations: G.stations.map(({ id, x, y, name, cargo }) => ({ id, x, y, name, cargo })),
       trains: G.trains.map(t => ({ id: t.id, name: t.name, color: t.color, pattern: t.pattern, face: t.face, eng: t.eng, wagons: t.wagons, route: t.route, target: t.target, load: t.load, earned: t.earned })),
@@ -2376,15 +2935,18 @@ function load() {
   try { d = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { return false; }
   if (!d || d.v !== 1) return false;
   try {
+    W = d.W || 40; H = d.H || 24; // saves from before big maps are 40×24
+    if (d.terr.length !== W * H) return false;
     G = {
-      v: 1, seed: d.seed, coins: d.coins, stars: d.stars, time: d.time, prodT: 0, nextId: d.nextId, nameIx: d.nameIx, rr: 0, piggyAt: d.piggyAt ?? -999,
+      v: 1, seed: d.seed, W, H, scn: d.scn || { id: 'free', done: false }, diff: DIFFS[d.diff] ? d.diff : 'easy', adv: !!d.adv, sig: d.sig && d.sig.length === W * H ? Uint8Array.from(d.sig) : new Uint8Array(W * H), runT: d.runT || 0, runAcc: d.runAcc || 0, coins: d.coins, stars: d.stars, time: d.time, prodT: 0, nextId: d.nextId, nameIx: d.nameIx, rr: 0, piggyAt: d.piggyAt ?? -999,
       terr: Uint8Array.from(d.terr), conn: Uint8Array.from(d.conn),
       road: d.road ? Uint8Array.from(d.road) : new Uint8Array(W * H), deco: d.deco ? Uint8Array.from(d.deco) : new Uint8Array(W * H),
       occ: new Int16Array(W * H).fill(-1), stn: new Int32Array(W * H).fill(-1),
       places: d.places, stations: d.stations.map(s => ({ ...s, places: [] })), trains: [], roads: d.roads || [],
-      buses: d.buses || [], busN: d.busN || 0, stats: d.stats, quests: d.quests,
+      buses: d.buses || [], busN: d.busN || 0, stats: d.stats, quests: (d.quests || []).filter(q => q.kind !== 'deliver' || CARGO[q.type]),
     };
     for (const p of G.places) for (const i of p.tiles) G.occ[i] = p.id;
+    while (G.quests.length < 3) G.quests.push(makeQuest());
     for (const s of G.stations) G.stn[idx(s.x, s.y)] = s.id;
     refreshCatch();
     for (const t of d.trains) {
@@ -2392,10 +2954,11 @@ function load() {
       if (!st || !ENG[t.eng]) continue;
       const tr = { ...t, state: 'stop', timer: 1, trail: null, d: 0, leg: null, atTile: 0, inE: -1, smokeT: 0 };
       tr.target = st.id; placeAt(tr, idx(st.x, st.y));
+      tr.ghost = GHOST_T; // trains parked together at a station get time to spread out
       G.trains.push(tr);
     }
-    initCars(); undoStack.length = 0; curSeason = -1; draft = null;
-    dirty = true;
+    initCars(); undoStack.length = 0; curSeason = -1; draft = null; view.init = false;
+    dirty = true; sigDirty = true; wrecks = [];
     return true;
   } catch (e) { return false; }
 }
@@ -2403,16 +2966,29 @@ function load() {
 // ---------- main loop ----------
 function sim(dt) {
   G.time += dt;
-  for (const tr of G.trains.slice()) updTrain(tr, dt);
+  if (G.adv) updTaken();
+  for (const tr of G.trains.slice()) { updTrain(tr, dt); if (tr.ghost > 0) tr.ghost -= dt; }
+  if (G.adv) checkCrashes();
   updCars(dt);
   G.prodT += dt;
   if (G.prodT >= PROD_EVERY) { G.prodT -= PROD_EVERY; produce(); }
+  if (D().run) {
+    G.runT = (G.runT || 0) + dt;
+    if (G.runT >= RUN_EVERY) { G.runT -= RUN_EVERY; payRunning(); }
+  }
+}
+// Running costs come out a little at a time; coins can dip below zero, and then nothing new can be bought.
+function payRunning() {
+  const perMin = G.trains.reduce((a, tr) => a + trainRun(tr), 0) + G.buses.length * busRun();
+  G.runAcc = (G.runAcc || 0) + perMin * RUN_EVERY / 60;
+  const n = Math.floor(G.runAcc); if (n <= 0) return;
+  G.runAcc -= n; G.coins -= n; G.stats.running = (G.stats.running || 0) + n;
 }
 let uiT = 0, saveT = 0;
 function tick(rdt) {
   let sdt = rdt * speed;
   while (sdt > 1e-6) { const h = Math.min(0.05, sdt); sim(h); sdt -= h; }
-  fx(rdt);
+  fx(rdt); updWrecks(rdt);
   music();
   const si = seasonIx();
   if (si !== curSeason) {
@@ -2422,10 +2998,10 @@ function tick(rdt) {
   uiT -= rdt;
   if (uiT <= 0) {
     uiT = 0.25;
-    checkQuests();
-    if (G.coins < ENGINES[0].cost && !G.trains.length && G.time - G.piggyAt > 45) {
-      G.piggyAt = G.time; G.coins += 80; sfx('coin');
-      toast(t('🐷 Oink! Your piggy bank found 80 coins!'));
+    checkQuests(); checkGoal();
+    if (G.coins < price(ENGINES[0].cost) && !G.trains.length && !G.buses.length && G.time - G.piggyAt > 45) {
+      const n = price(80); G.piggyAt = G.time; G.coins = Math.max(0, G.coins) + n; sfx('coin');
+      toast(t('🐷 Oink! Your piggy bank found {n} coins!', { n }));
     }
     updateUI();
   }
@@ -2452,7 +3028,8 @@ if (/[?&]debug\b/.test(location.search)) {
     get G() { return G; }, tick, sim, draw, newGame, findPath, buyTrain, buildStation, connect, layTrack, removeTile,
     setTool, produce, idx, KINDS, CARGO, save, load, undo, beginAct, endAct, placeDeco, draftStart, draftTo, draftCommit,
     darkness, seasonIx, gateDown, buyBus, sellBus, roadRoute, pick, panelAct, panelHTML, deliver, makeQuest,
-    get sel() { return sel; }, set sel(v) { sel = v; }, get cars() { return cars; }, get undoStack() { return undoStack; }, get draft() { return draft; },
+    get sel() { return sel; }, set sel(v) { sel = v; },
+    get W() { return W; }, get H() { return H; }, view, zoomAt, centerOn, clampView, minScale, startScenario, openMaps, checkGoal, SCENARIOS, SIZES, sized, DIFFS, price, trainRun, busRun, payRunning, toggleSignal, updTaken, sigLimit, posAt, checkCrashes, rescueTrain, get taken() { return taken; }, get mapAdv() { return mapAdv; }, set mapAdv(v) { mapAdv = v; }, get mapDiff() { return mapDiff; }, set mapDiff(v) { mapDiff = v; }, get mapSize() { return mapSize; }, set mapSize(v) { mapSize = v; }, resize, get cars() { return cars; }, get undoStack() { return undoStack; }, get draft() { return draft; },
   };
 }
 })();
