@@ -8,7 +8,7 @@ const MAX_S = 72; // most zoomed-in: CSS pixels per tile
 const DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0]; // N E S W
 const OPP = d => (d + 2) & 3;
 const GRASS = 0, WATER = 1, TREE = 2, HILL = 3;
-const COST = { track: 2, bridge: 8, tunnel: 6, station: 15, wagon: 10, signal: 12 };
+const COST = { track: 2, bridge: 8, tunnel: 6, station: 15, wagon: 10, signal: 12, road: 3, roadBridge: 10 };
 const CATCH = 2, WAGON_CAP = 8, MAX_WAGONS = 6, GAP = 0.58, ENG_LEN = 0.62, STN_CAP = 60, PROD_EVERY = 5;
 const SEASON_LEN = 150, DAY_LEN = 120, NIGHT_DARK = 0.5, UNDO_MAX = 30;
 const SAVE_KEY = 'puffwhistle-save-v1', MUSIC_KEY = 'puffwhistle-music';
@@ -262,7 +262,7 @@ const SV = {
   'Now click another town joined to it by a road!': 'Klicka nu på en annan stad som har väg dit!',
   "Those towns aren't joined by a road. 🚌": 'De städerna har ingen väg mellan sig. 🚌',
   'Click on a town! 🏘️': 'Klicka på en stad! 🏘️',
-  'There are no roads here. Try a 🗺️ New map!': 'Det finns inga vägar här. Prova en 🗺️ Ny karta!',
+
   'Beep beep! {name} is on its way! 🚌': 'Pip pip! {name} är på väg! 🚌',
   '🚌 Driving': '🚌 Kör', '🧒 At the bus stop': '🧒 Vid hållplatsen',
   'Pick a valley': 'Välj en dal', 'Free play': 'Fritt spel', 'A random valley. Build whatever you like!': 'En slumpad dal. Bygg vad du vill!',
@@ -271,6 +271,16 @@ const SV = {
   'Snowy Valley': 'Snödalen', 'It is always winter. Towns need lots of milk for hot cocoa!': 'Det är alltid vinter. Städerna behöver massor av mjölk till varm choklad!',
   'Busy Towns': 'Myllrande städer', 'Lots of towns and roads. Carry passengers by train and bus!': 'Massor av städer och vägar. Kör passagerare med tåg och buss!',
   'Goal:': 'Mål:', 'Best:': 'Bästa:', 'Cancel': 'Avbryt',
+  '📋 Save as text (JSON)': '📋 Spara som text (JSON)', '📋 Copy': '📋 Kopiera', '📥 Load this text': '📥 Ladda den här texten', 'Sure? 📥': 'Säker? 📥',
+  'Press Copy to get your valley as text, or paste a saved valley here and load it.': 'Tryck Kopiera för att få din dal som text, eller klistra in en sparad dal här och ladda den.',
+  '📋 Copied! Paste it anywhere to keep it.': '📋 Kopierat! Klistra in den var som helst för att spara den.', 'Select the text and copy it yourself.': 'Markera texten och kopiera den själv.',
+  'Paste a saved valley into the box first.': 'Klistra in en sparad dal i rutan först.',
+  'Road': 'Väg', "Roads can't go through buildings!": 'Vägar kan inte gå genom hus!', 'Roads go around hills, not through them! ⛰️': 'Vägar går runt kullar, inte igenom dem! ⛰️',
+  "Roads can't go through a station! 🚉": 'Vägar kan inte gå genom en station! 🚉', 'A 🚦 signal is in the way. Take it away first!': 'En 🚦 signal är i vägen. Ta bort den först!',
+  'Roads can only cross straight track, straight across! 🛤️': 'Vägar kan bara korsa raka spår, rakt över! 🛤️',
+  '{name} went back to the garage. Its road is gone!': '{name} åkte tillbaka till garaget. Vägen är borta!',
+  'There are no roads yet. Build some with 🛣️ Road!': 'Det finns inga vägar än. Bygg några med 🛣️ Väg!',
+  'Drag to draw a road, then let go to build it. Join two towns so 🚌 buses can drive between them. Roads can cross straight track.': 'Dra för att rita en väg och släpp för att bygga den. Koppla ihop två städer så att 🚌 bussar kan köra mellan dem. Vägar kan korsa raka spår.',
   'Saved games': 'Sparade spel', 'Save and load': 'Spara och ladda', '💾 Saves': '💾 Spara',
   'Your valley also saves by itself all the time. Use the slots to keep different valleys.': 'Din dal sparas också av sig själv hela tiden. Använd platserna för att spara olika dalar.',
   'Slot {n}': 'Plats {n}', 'Empty': 'Tom', 'Saved {when}': 'Sparad {when}', '💾 Save here': '💾 Spara här', 'Replace it? 💾': 'Byta ut den? 💾',
@@ -602,11 +612,40 @@ function connect(a, d) {
   retryLost();
   return true;
 }
+// Same idea for roads: no hills (roads don't tunnel), bridges over water, and only straight across straight track.
+function roadLinkCost(a, d, pend) {
+  const b = nb(a, d);
+  if (b < 0) return { err: '' };
+  if (G.road[a] & (1 << d)) return { cost: 0 };
+  if (G.occ[a] >= 0 || G.occ[b] >= 0) return { err: "Roads can't go through buildings!" };
+  if (G.terr[a] === HILL || G.terr[b] === HILL) return { err: 'Roads go around hills, not through them! ⛰️' };
+  if (G.deco[a] || G.deco[b]) return { err: 'Something pretty is in the way! Tidy it with 🧹 first.' };
+  for (const [i, e] of [[a, d], [b, OPP(d)]]) {
+    const c = G.conn[i]; if (!c) continue;
+    if (G.stn[i] >= 0) return { err: "Roads can't go through a station! 🚉" };
+    if (G.sig[i]) return { err: 'A 🚦 signal is in the way. Take it away first!' };
+    const m = G.road[i] | (pend ? pend.get(i) || 0 : 0) | (1 << e);
+    if (G.terr[i] === WATER || (c !== 5 && c !== 10) || (m & c)) return { err: 'Roads can only cross straight track, straight across! 🛤️' };
+  }
+  return { cost: price(G.terr[a] === WATER || G.terr[b] === WATER ? COST.roadBridge : COST.road) };
+}
+function connectRoad(a, d) {
+  const r = roadLinkCost(a, d, null);
+  if (r.err !== undefined) return r.err ? fail(r.err) : false;
+  if (!r.cost) return true;
+  if (G.coins < r.cost) return fail('Not enough coins 🪙');
+  const b = nb(a, d);
+  G.coins -= r.cost;
+  G.road[a] |= 1 << d; G.road[b] |= 1 << OPP(d);
+  for (const i of [a, b]) if (G.terr[i] === TREE) { G.terr[i] = GRASS; puff(tx(i) + 0.5, ty(i) + 0.5, 3, '#7cc46a'); }
+  touch(); dirty = true; sfx('build');
+  return true;
+}
 function fail(msg) { sfx('err'); toast(t(msg)); return false; }
 
 // ---------- track draft: drag shows ghost rails and their cost, letting go builds them ----------
 function stepToward(a, b) { const dx = tx(b) - tx(a), dy = ty(b) - ty(a); return Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? 1 : 3) : (dy > 0 ? 2 : 0); }
-function draftStart(i) { draft = { tiles: [i], dirs: [], costs: [], pend: new Map(), err: null, block: -1 }; }
+function draftStart(i, kind = 'track') { draft = { kind, tiles: [i], dirs: [], costs: [], pend: new Map(), err: null, block: -1 }; }
 function addPend(a, d) {
   const b = nb(a, d);
   draft.pend.set(a, (draft.pend.get(a) || 0) | 1 << d);
@@ -623,7 +662,7 @@ function draftTo(goal) {
       draft.pend = new Map(); draft.dirs.forEach((e, k) => addPend(draft.tiles[k], e));
       a = b; continue;
     }
-    const r = linkCost(a, d, draft.pend);
+    const r = (draft.kind === 'road' ? roadLinkCost : linkCost)(a, d, draft.pend);
     if (r.err !== undefined) {
       if (r.err && r.err !== draft.err) { draft.err = r.err; fail(r.err); }
       draft.block = b; break;
@@ -638,7 +677,10 @@ const draftCost = () => draft ? draft.costs.reduce((s, c) => s + c, 0) : 0;
 function draftCommit() {
   const dr = draft; draft = null;
   if (!dr) return;
-  for (let k = 0; k < dr.dirs.length; k++) if (!connect(dr.tiles[k], dr.dirs[k])) break;
+  const join = dr.kind === 'road' ? connectRoad : connect;
+  let k = 0;
+  for (; k < dr.dirs.length; k++) if (!join(dr.tiles[k], dr.dirs[k])) break;
+  if (dr.kind === 'road') roadsChanged(dr.tiles.slice(0, k + 1));
 }
 
 // ---------- undo: each pointer stroke is one action ----------
@@ -646,6 +688,7 @@ function touch() { if (act) act.changed = true; }
 function beginAct() {
   act = {
     changed: false, coins: G.coins, terr: G.terr.slice(), conn: G.conn.slice(), deco: G.deco.slice(), sig: G.sig.slice(),
+    road: G.road.slice(), roads: G.roads.slice(), buses: G.buses.slice(),
     stations: G.stations.map(({ id, x, y, name, cargo }) => ({ id, x, y, name, cargo: { ...cargo } })),
     routes: G.trains.map(tr => [tr.id, tr.route.slice()]), trains: G.trains.slice(),
   };
@@ -655,6 +698,8 @@ function endAct() {
   if (!a || !a.changed) return;
   a.spent = a.coins - G.coins;
   a.lost = a.trains.filter(tr => !G.trains.includes(tr));
+  a.lostBuses = a.buses.filter(b => !G.buses.includes(b));
+  delete a.buses;
   delete a.trains;
   undoStack.push(a);
   if (undoStack.length > UNDO_MAX) undoStack.shift();
@@ -669,11 +714,16 @@ function undo() {
   undoStack.pop();
   G.coins += a.spent;
   G.terr = a.terr; G.conn = a.conn; G.deco = a.deco; G.sig = a.sig;
+  const roadUndone = a.road.some((v, i) => v !== G.road[i]) || a.lostBuses.length;
+  G.road = a.road; G.roads = a.roads;
+  for (const b of a.lostBuses) G.buses.push(b);
   // houses that grew since the action stay put
   for (const p of G.places) for (const i of p.tiles) {
     for (const d of bits(G.conn[i])) { const n = nb(i, d); if (n >= 0) G.conn[n] &= ~(1 << OPP(d)); }
-    G.conn[i] = 0; G.deco[i] = 0; G.terr[i] = GRASS;
+    for (const d of bits(G.road[i])) { const n = nb(i, d); if (n >= 0) G.road[n] &= ~(1 << OPP(d)); }
+    G.conn[i] = 0; G.road[i] = 0; G.deco[i] = 0; G.terr[i] = GRASS;
   }
+  if (roadUndone) { initCars(); roadsChanged(); }
   G.stations = a.stations.filter(s => G.occ[idx(s.x, s.y)] < 0 && G.conn[idx(s.x, s.y)])
     .map(s => ({ ...s, cargo: (stById(s.id) || s).cargo, places: [] }));
   G.stn.fill(-1);
@@ -762,6 +812,13 @@ function removeTile(i) {
       G.coins += 1;
     }
     did = true;
+  } else if (G.road[i]) {
+    for (const d of bits(G.road[i])) {
+      const n = nb(i, d);
+      G.road[i] &= ~(1 << d); if (n >= 0) G.road[n] &= ~(1 << OPP(d));
+      G.coins += 1;
+    }
+    roadsChanged(); did = true;
   } else if (G.deco[i]) { G.coins += Math.floor(DECOS[G.deco[i] - 1].cost / 2); G.deco[i] = 0; did = true; }
   else if (G.terr[i] === TREE) { G.terr[i] = GRASS; did = true; }
   if (!did) return;
@@ -1133,14 +1190,29 @@ function roadMover(path) {
 }
 function initCars() {
   cars = [];
-  G.roads.forEach((path, n) => {
-    if (path.length < 3) return;
-    const m = roadMover(path);
-    for (let k = 0; k < (path.length > 10 ? 2 : 1); k++) {
-      cars.push({ ...m, s: k ? m.len : 0, dir: k ? -1 : 1, wait: 0.5 + k * 2 + Math.random(), v: 1.2 + Math.random() * 0.5, col: CAR_COLS[(n * 2 + k) % CAR_COLS.length] });
-    }
-  });
+  G.roads.forEach(addCars);
   for (const rec of G.buses) spawnBus(rec);
+}
+function addCars(path, n) {
+  if (path.length < 3) return;
+  const m = roadMover(path);
+  for (let k = 0; k < (path.length > 10 ? 2 : 1); k++) {
+    cars.push({ ...m, s: k ? m.len : 0, dir: k ? -1 : 1, wait: 0.5 + k * 2 + Math.random(), v: 1.2 + Math.random() * 0.5, col: CAR_COLS[(n * 2 + k) % CAR_COLS.length] });
+  }
+}
+// After roads are built or taken away: cars on broken roads go, new long roads get cars,
+// and buses find their way again (or go back to the garage if their towns aren't joined any more).
+const MAX_CAR_ROADS = 60;
+function roadsChanged(built) {
+  const whole = p => p.every((i, k) => !k || (G.road[p[k - 1]] & (1 << dirTo(p[k - 1], i))));
+  G.roads = G.roads.filter(whole);
+  cars = cars.filter(c => whole(c.path));
+  if (built && built.length >= 5 && G.roads.length < MAX_CAR_ROADS) { G.roads.push(built); addCars(built, G.roads.length - 1); }
+  for (const rec of G.buses.slice()) {
+    if (busCar(rec)) continue;
+    if (roadRoute(G.places[rec.a], G.places[rec.b])) spawnBus(rec);
+    else { sellBus(rec); toast(t('{name} went back to the garage. Its road is gone!', { name: busName(rec) })); }
+  }
 }
 
 // ---------- buses ----------
@@ -1171,7 +1243,7 @@ function spawnBus(rec) {
 }
 const busLoad = town => clamp(Math.round(town.tiles.length * 1.2), 3, BUS_CAP);
 function buyBus(a, b) {
-  if (!G.road.some(v => v)) return fail('There are no roads here. Try a 🗺️ New map!');
+  if (!G.road.some(v => v)) return fail('There are no roads yet. Build some with 🛣️ Road!');
   if (!roadRoute(G.places[a], G.places[b])) return fail("Those towns aren't joined by a road. 🚌");
   if (G.coins < price(COST_BUS)) return fail('Not enough coins 🪙');
   G.coins -= price(COST_BUS);
@@ -2133,7 +2205,7 @@ function drawOverlay() {
     catchRect(x, y, 'rgba(255,230,100,0.22)', '#f2b632');
     for (const p of G.places) if (p.tiles.some(t => Math.abs(tx(t) - x) <= CATCH && Math.abs(ty(t) - y) <= CATCH)) outlinePlace(p, '#ffffff');
     ctx.strokeStyle = ok ? '#3fb36b' : '#e74c3c'; ctx.lineWidth = 0.1; ctx.strokeRect(x + 0.05, y + 0.05, 0.9, 0.9);
-  } else if ((tool === 'track' && !draft) || tool === 'remove') {
+  } else if (((tool === 'track' || tool === 'road') && !draft) || tool === 'remove') {
     ctx.fillStyle = tool === 'remove' ? 'rgba(231,76,60,0.3)' : 'rgba(255,255,255,0.3)';
     ctx.fillRect(x, y, 1, 1);
     ctx.strokeStyle = tool === 'remove' ? '#e74c3c' : '#ffffff'; ctx.lineWidth = 0.06; ctx.strokeRect(x + 0.03, y + 0.03, 0.94, 0.94);
@@ -2149,17 +2221,20 @@ function drawDraft() {
   const bad = new Set();
   draft.costs.forEach((c, k) => { sum += c; if (sum > G.coins) { bad.add(draft.tiles[k]); bad.add(draft.tiles[k + 1]); } });
   ctx.lineCap = 'round';
+  const road = draft.kind === 'road', have = road ? G.road : G.conn;
   for (const red of [false, true]) {
-    ctx.strokeStyle = red ? 'rgba(231,76,60,0.9)' : 'rgba(255,255,255,0.9)'; ctx.lineWidth = 0.09; ctx.beginPath();
+    ctx.strokeStyle = red ? 'rgba(231,76,60,0.9)' : 'rgba(255,255,255,0.9)'; ctx.lineWidth = road ? 0.5 : 0.09; ctx.beginPath();
+    if (road) ctx.globalAlpha = 0.6;
     for (const [i, m] of draft.pend) {
-      const add = m & ~G.conn[i];
+      const add = m & ~have[i];
       if (!add || bad.has(i) !== red) continue;
-      for (const [e, f] of tileSegs(m | G.conn[i])) {
+      for (const [e, f] of tileSegs(m | have[i])) {
         if (!((add >> e) & 1) && !(f >= 0 && (add >> f) & 1)) continue;
-        railPath(ctx, tx(i), ty(i), e, f, -0.14); railPath(ctx, tx(i), ty(i), e, f, 0.14);
+        if (road) railPath(ctx, tx(i), ty(i), e, f, 0);
+        else { railPath(ctx, tx(i), ty(i), e, f, -0.14); railPath(ctx, tx(i), ty(i), e, f, 0.14); }
       }
     }
-    ctx.stroke();
+    ctx.stroke(); ctx.globalAlpha = 1;
   }
   if (draft.block >= 0) {
     const x = tx(draft.block), y = ty(draft.block);
@@ -2408,6 +2483,7 @@ function hintText() {
   if (G.adv && G.trains.some(tr => tr.sigWait > 20)) return t('🚦 Some trains are stuck waiting. Try a passing loop, or click the train and press ✨ Rescue.');
   if (tool === 'remove') return t('Click things to tidy them away. You get some coins back!');
   if (tool === 'deco') return t('Pick something pretty, then click on the grass. Drag to plant lots! 🌷');
+  if (tool === 'road') return t('Drag to draw a road, then let go to build it. Join two towns so 🚌 buses can drive between them. Roads can cross straight track.');
   if (tool === 'bus') return t(busDraft < 0 ? 'Click a town to start a bus route. Buses drive on the roads 🚌' : 'Now click another town joined to it by a road!');
   let track = 0;
   for (let i = 0; i < W * H; i++) if (G.conn[i]) { track++; break; }
@@ -2530,6 +2606,7 @@ function applyLang() {
   document.title = t('Puffwhistle Valley');
   document.querySelectorAll('[data-i18n]').forEach(el => { el.dataset.en = el.dataset.en || el.textContent; el.textContent = t(el.dataset.en); });
   document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); });
   $('lang').textContent = lang === 'sv' ? '🌐 English' : '🌐 Svenska';
 }
 function setLang(l) {
@@ -2732,7 +2809,7 @@ cv.addEventListener('pointerdown', e => {
   down = true;
   if (!tile) return;
   beginAct();
-  if (tool === 'track') draftStart(tile.i);
+  if (tool === 'track' || tool === 'road') draftStart(tile.i, tool);
   else if (tool === 'remove') { removeTile(tile.i); lastTile = tile.i; }
   else if (tool === 'deco') { placeDeco(tile.i, draftDeco); lastTile = tile.i; }
   else if (tool === 'station') buildStation(tile.i);
@@ -2758,7 +2835,7 @@ cv.addEventListener('pointermove', e => {
     return;
   }
   if (!down || !hover) return;
-  if (tool === 'track' && draft) draftTo(hover.i);
+  if ((tool === 'track' || tool === 'road') && draft) draftTo(hover.i);
   else if (tool === 'remove' && hover.i !== lastTile) { removeTile(hover.i); lastTile = hover.i; }
   else if (tool === 'deco' && hover.i !== lastTile) { placeDeco(hover.i, draftDeco, true); lastTile = hover.i; }
 });
@@ -2774,7 +2851,7 @@ const up = e => {
     else if (p.btn === 0 && tool === 'look') { const w = worldAt(e); pick(w, tileAt(w)); }
     return;
   }
-  if (down && tool === 'track') draftCommit();
+  if (down && (tool === 'track' || tool === 'road')) draftCommit();
   down = false; lastTile = null;
   endAct(); updateUI();
 };
@@ -2898,9 +2975,9 @@ $('lang').addEventListener('click', () => { setLang(lang === 'sv' ? 'en' : 'sv')
 $('startbtn').addEventListener('click', () => { audio(); $('welcome').hidden = true; sfx('toot'); });
 
 addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT') return;
-  const tools = ['look', 'track', 'station', 'train', 'bus', 'deco', 'remove', 'signal'];
-  if (e.key >= '1' && e.key <= (G.adv ? '8' : '7')) setTool(tools[+e.key - 1]);
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  const tools = ['look', 'track', 'station', 'train', 'road', 'bus', 'deco', 'remove', 'signal'];
+  if (e.key >= '1' && e.key <= (G.adv ? '9' : '8')) setTool(tools[+e.key - 1]);
   else if (e.key === 'z' || e.key === 'Z') { undo(); e.preventDefault(); }
   else if (e.key === 'Escape') { if (draft) draft = null; else { sel = null; setTool('look'); } }
   else if (e.key === 'Enter' && tool === 'train') routeAct('go');
@@ -2996,7 +3073,7 @@ function saveInfo(d) {
 }
 function openSaves() {
   slotArmed = null;
-  renderSaves();
+  renderSaves(); renderJsonBtn();
   $('saves').hidden = false;
 }
 function renderSaves() {
@@ -3053,13 +3130,31 @@ function importSave(file) {
   r.onerror = () => fail("That save couldn't be opened 😟");
   r.readAsText(file);
 }
+// Save as JSON text: copy it somewhere, or paste one in to load it.
+function copySaveText() {
+  const el = $('savejson'); el.value = JSON.stringify(snapshot()); el.select();
+  const done = () => { sfx('coin'); toast(t('📋 Copied! Paste it anywhere to keep it.')); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(el.value).then(done, () => toast(t('Select the text and copy it yourself.')));
+  else toast(t('Select the text and copy it yourself.'));
+}
+function loadSaveText() {
+  const txt = $('savejson').value.trim();
+  if (!txt) return fail('Paste a saved valley into the box first.');
+  if (slotArmed !== 'json') { slotArmed = 'json'; renderJsonBtn(); return; }
+  slotArmed = null; renderJsonBtn();
+  let d = null; try { d = JSON.parse(txt); } catch (e) { /* not JSON */ }
+  if (loadSave(d)) $('savejson').value = '';
+}
+function renderJsonBtn() { $('jsonload').textContent = t(slotArmed === 'json' ? 'Sure? 📥' : '📥 Load this text'); $('jsonload').classList.toggle('armed', slotArmed === 'json'); }
 $('savebtn').addEventListener('click', () => { sfx('pop'); openSaves(); });
 $('saves').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
-  if (b.dataset.slot) slotAct(b.dataset.slot);
+  if (b.dataset.slot) { slotAct(b.dataset.slot); renderJsonBtn(); }
   else if (b.id === 'saveexport') exportSave();
   else if (b.id === 'saveimport') $('savefile').click();
   else if (b.id === 'savesclose') $('saves').hidden = true;
+  else if (b.id === 'jsoncopy') copySaveText();
+  else if (b.id === 'jsonload') loadSaveText();
 });
 $('savefile').addEventListener('change', e => { const file = e.target.files[0]; e.target.value = ''; if (file) importSave(file); });
 
@@ -3129,7 +3224,7 @@ if (/[?&]debug\b/.test(location.search)) {
     setTool, produce, idx, KINDS, CARGO, save, load, undo, beginAct, endAct, placeDeco, draftStart, draftTo, draftCommit,
     darkness, seasonIx, gateDown, buyBus, sellBus, roadRoute, pick, panelAct, panelHTML, deliver, makeQuest,
     get sel() { return sel; }, set sel(v) { sel = v; },
-    get W() { return W; }, get H() { return H; }, view, zoomAt, centerOn, clampView, minScale, startScenario, openMaps, checkGoal, SCENARIOS, SIZES, sized, DIFFS, price, trainRun, busRun, payRunning, toggleSignal, updTaken, sigLimit, posAt, checkCrashes, rescueTrain, get taken() { return taken; }, get mapAdv() { return mapAdv; }, set mapAdv(v) { mapAdv = v; }, get mapDiff() { return mapDiff; }, set mapDiff(v) { mapDiff = v; }, get mapSize() { return mapSize; }, snapshot, readSlot, slotAct, loadSave, openSaves, exportSave, SLOTS, set mapSize(v) { mapSize = v; }, resize, get cars() { return cars; }, get undoStack() { return undoStack; }, get draft() { return draft; },
+    get W() { return W; }, get H() { return H; }, view, zoomAt, centerOn, clampView, minScale, startScenario, openMaps, checkGoal, SCENARIOS, SIZES, sized, DIFFS, price, trainRun, busRun, payRunning, toggleSignal, updTaken, sigLimit, posAt, checkCrashes, rescueTrain, get taken() { return taken; }, get mapAdv() { return mapAdv; }, set mapAdv(v) { mapAdv = v; }, get mapDiff() { return mapDiff; }, set mapDiff(v) { mapDiff = v; }, get mapSize() { return mapSize; }, copySaveText, loadSaveText, roadsChanged, connectRoad, roadLinkCost, get roadsN() { return G.roads.length; }, snapshot, readSlot, slotAct, loadSave, openSaves, exportSave, SLOTS, set mapSize(v) { mapSize = v; }, resize, get cars() { return cars; }, get undoStack() { return undoStack; }, get draft() { return draft; },
   };
 }
 })();

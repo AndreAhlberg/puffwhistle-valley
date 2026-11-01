@@ -16,6 +16,10 @@ Or open `index.html` in a browser. There's no build step and no server needed.
   in its 5×5 yellow square.
 - **🚂 Train**: click stations in order, pick an engine and press **Go!** Trains load whatever another
   stop on their route wants and get paid more for longer trips.
+- **🛣️ Road** (3🪙, bridges 10🪙): drag to draw a road, like track. Roads can't go over hills, but they can bridge
+  water and cross straight track, straight across, as a level crossing. Join two towns with a road and a 🚌 bus can drive
+  between them. Long new roads get cars. Removing a road (🧹, after any rails on that tile) sends buses that
+  used it back to the garage.
 - **🚌 Bus** (40🪙): click a town, then another town joined to it by a road. The bus shuttles passengers
   between them. It pays less than a train but needs no track.
 - **🌷 Decorate**: flowers, trees, fences (they join up), benches, lamp posts (they glow at night), duck
@@ -30,7 +34,7 @@ Or open `index.html` in a browser. There's no build step and no server needed.
 - **↩️ Undo**: each drag or click is one step, up to 30 back. Buying a train clears the undo history.
 - **Moving around**: scroll or pinch to zoom. Drag with 👆 Look, or with the right or middle mouse button
   in any tool, to pan. The ➕ ➖ ⤢ buttons also zoom, and clicking the minimap in the corner jumps there.
-- Keys: `1`–`7` pick tools, `Z` undoes, `Space` pauses, `Enter` sends off a new train, `Esc` cancels,
+- Keys: `1`–`8` pick tools, `Z` undoes, `Space` pauses, `Enter` sends off a new train, `Esc` cancels,
   arrow keys pan, `+`/`-` zoom and `0` shows the whole map.
 
 ## Saving
@@ -38,7 +42,9 @@ The game autosaves all the time, so closing the page never loses your valley. **
 save slots for keeping different valleys. Each slot shows a little map picture, the valley, coins, stars, trains and
 when it was saved. Replacing, loading or deleting a slot asks "Sure?" first. **⬇️ Save to a file** downloads the valley,
 and **⬆️ Open a file** loads one back, for example on another computer. A file that isn't a valley is refused and your
-current game stays as it was.
+current game stays as it was. **📋 Save as text (JSON)** does the same with copy and paste: **📋 Copy** puts the
+valley on the clipboard as JSON text, and pasting a saved valley into the box and pressing **📥 Load this text** (twice, to be
+sure) opens it.
 
 ## Difficulty
 Pick a difficulty along with the map size when you start a new map. The top bar shows which one you're on.
@@ -60,7 +66,7 @@ Long routes with full trains pay best. The piggy bank still helps if you have no
 ## 🚦 Advanced mode: signals and crashes
 Switch on **🚦 Signals & crashes** in the valley picker (it works with any difficulty and size). Trains are no
 longer friendly ghosts: two trains that meet on the same track crash 💥 and both are lost. A **🚦 Signal** tool
-(12🪙, key `8`) appears in the toolbar:
+(12🪙, key `9`) appears in the toolbar:
 
 - Put signals on straight track (not on stations, road crossings, tunnels or junctions). Click one again, or use 🧹,
   to take it away. Each signal works in both directions.
