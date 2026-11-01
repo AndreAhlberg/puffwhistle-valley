@@ -271,6 +271,14 @@ const SV = {
   'Snowy Valley': 'Snödalen', 'It is always winter. Towns need lots of milk for hot cocoa!': 'Det är alltid vinter. Städerna behöver massor av mjölk till varm choklad!',
   'Busy Towns': 'Myllrande städer', 'Lots of towns and roads. Carry passengers by train and bus!': 'Massor av städer och vägar. Kör passagerare med tåg och buss!',
   'Goal:': 'Mål:', 'Best:': 'Bästa:', 'Cancel': 'Avbryt',
+  'Saved games': 'Sparade spel', 'Save and load': 'Spara och ladda', '💾 Saves': '💾 Spara',
+  'Your valley also saves by itself all the time. Use the slots to keep different valleys.': 'Din dal sparas också av sig själv hela tiden. Använd platserna för att spara olika dalar.',
+  'Slot {n}': 'Plats {n}', 'Empty': 'Tom', 'Saved {when}': 'Sparad {when}', '💾 Save here': '💾 Spara här', 'Replace it? 💾': 'Byta ut den? 💾',
+  '📂 Load': '📂 Ladda', 'Sure? 📂': 'Säker? 📂', 'Delete': 'Ta bort', 'Sure? 🗑️': 'Säker? 🗑️',
+  '⬇️ Save to a file': '⬇️ Spara till en fil', '⬆️ Open a file': '⬆️ Öppna en fil', 'Close': 'Stäng',
+  '💾 Saved in slot {n}!': '💾 Sparat på plats {n}!', 'Could not save here 😟': 'Det gick inte att spara här 😟',
+  "That save couldn't be opened 😟": 'Den sparningen gick inte att öppna 😟', '📂 Loaded! Welcome back.': '📂 Laddat! Välkommen tillbaka.',
+  '⬇️ Your valley was saved to a file!': '⬇️ Din dal sparades till en fil!',
   'Easy': 'Lätt', 'Normal': 'Normal', 'Tycoon': 'Tågmagnat', 'Difficulty': 'Svårighet',
   'Lots of coins and nothing to pay for running trains. Just have fun!': 'Massor av mynt och inget att betala för att köra tåg. Bara ha kul!',
   'Things cost more, and trains and buses cost coins to run. Plan good routes!': 'Allt kostar mer, och tåg och bussar kostar mynt att köra. Planera bra linjer!',
@@ -2922,24 +2930,25 @@ function resize() {
 addEventListener('resize', resize);
 
 // ---------- save / load ----------
-function save() {
-  try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify({
+function snapshot() {
+  return {
       v: 1, seed: G.seed, W, H, scn: G.scn, diff: G.diff, adv: G.adv, sig: G.adv ? Array.from(G.sig) : undefined, runT: G.runT, runAcc: G.runAcc, coins: G.coins, stars: G.stars, time: G.time, nextId: G.nextId, nameIx: G.nameIx, piggyAt: G.piggyAt,
       terr: Array.from(G.terr), conn: Array.from(G.conn), road: Array.from(G.road), deco: Array.from(G.deco), roads: G.roads, places: G.places,
       stations: G.stations.map(({ id, x, y, name, cargo }) => ({ id, x, y, name, cargo })),
       trains: G.trains.map(t => ({ id: t.id, name: t.name, color: t.color, pattern: t.pattern, face: t.face, eng: t.eng, wagons: t.wagons, route: t.route, target: t.target, load: t.load, earned: t.earned })),
       buses: G.buses, busN: G.busN, stats: G.stats, quests: G.quests,
-    }));
-  } catch (e) { /* storage unavailable: the game still plays, it just won't remember */ }
+  };
 }
-function load() {
-  let d;
-  try { d = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { return false; }
+function save() {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot())); } catch (e) { /* storage unavailable: the game still plays, it just won't remember */ }
+}
+// Loads the autosave, or the given save data (from a slot or a file).
+function load(d) {
+  if (!d) try { d = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { return false; }
   if (!d || d.v !== 1) return false;
   try {
     W = d.W || 40; H = d.H || 24; // saves from before big maps are 40×24
-    if (d.terr.length !== W * H) return false;
+    if (!d.terr || d.terr.length !== W * H) return false;
     G = {
       v: 1, seed: d.seed, W, H, scn: d.scn || { id: 'free', done: false }, diff: DIFFS[d.diff] ? d.diff : 'easy', adv: !!d.adv, sig: d.sig && d.sig.length === W * H ? Uint8Array.from(d.sig) : new Uint8Array(W * H), runT: d.runT || 0, runAcc: d.runAcc || 0, coins: d.coins, stars: d.stars, time: d.time, prodT: 0, nextId: d.nextId, nameIx: d.nameIx, rr: 0, piggyAt: d.piggyAt ?? -999,
       terr: Uint8Array.from(d.terr), conn: Uint8Array.from(d.conn),
@@ -2965,6 +2974,94 @@ function load() {
     return true;
   } catch (e) { return false; }
 }
+
+// ---------- save slots ----------
+// A few named slots in localStorage, plus saving to / opening from a file to move a valley between computers.
+const SLOTS = 3, slotKey = n => `puffwhistle-slot-${n}`;
+let slotArmed = null;
+function readSlot(n) { try { const d = JSON.parse(localStorage.getItem(slotKey(n))); return d && d.v === 1 ? d : null; } catch (e) { return null; } }
+function stamp(d) {
+  d.savedAt = Date.now();
+  try { renderMini(); d.thumb = miniImg.toDataURL('image/png'); } catch (e) { /* no picture */ }
+  return d;
+}
+function saveInfo(d) {
+  const S = SCENARIOS[d.scn && d.scn.id] || SCENARIOS.free, Z = SIZES[d.scn && d.scn.size] || SIZES.big, Df = DIFFS[d.diff] || DIFFS.easy;
+  const when = d.savedAt ? new Date(d.savedAt).toLocaleString(lang === 'sv' ? 'sv-SE' : undefined, { dateStyle: 'short', timeStyle: 'short' }) : '';
+  return `${d.thumb ? `<img src="${esc(d.thumb)}" alt="">` : '<span class="big">🗺️</span>'}
+    <div class="info"><b>${S.e} ${t(S.name)}</b>
+    <span>${Z.e} ${t(Z.name)} · ${Df.e} ${t(Df.name)}${d.adv ? ' · 🚦' : ''}</span>
+    <span>🪙 ${+d.coins || 0} · ⭐ ${+d.stars || 0} · 🚂 ${(d.trains || []).length} · ⏱️ ${fmtTime(+d.time || 0)}</span>
+    ${when ? `<small>${t('Saved {when}', { when })}</small>` : ''}</div>`;
+}
+function openSaves() {
+  slotArmed = null;
+  renderSaves();
+  $('saves').hidden = false;
+}
+function renderSaves() {
+  let html = '';
+  for (let n = 1; n <= SLOTS; n++) {
+    const d = readSlot(n), a = k => slotArmed === k + n;
+    html += `<div class="slot">${d ? saveInfo(d) : `<span class="big">📭</span><div class="info"><b>${t('Slot {n}', { n })}</b><span>${t('Empty')}</span></div>`}
+      <div class="sbtns"><button data-slot="save:${n}" class="${a('save:') ? 'armed' : ''}">${t(a('save:') ? 'Replace it? 💾' : '💾 Save here')}</button>
+      ${d ? `<button data-slot="load:${n}" class="${a('load:') ? 'armed' : ''}">${t(a('load:') ? 'Sure? 📂' : '📂 Load')}</button>
+      <button data-slot="del:${n}" class="${a('del:') ? 'armed' : ''}" title="${t('Delete')}">${a('del:') ? t('Sure? 🗑️') : '🗑️'}</button>` : ''}</div></div>`;
+  }
+  $('slots').innerHTML = html;
+}
+// Swaps in a saved valley; if the data is bad the current game is put back.
+function loadSave(d) {
+  const keep = snapshot();
+  if (!d || d.v !== 1 || !load(d)) { load(keep); return fail("That save couldn't be opened 😟"); }
+  sel = null; paintOpen = renaming = false; armed = null;
+  $('saves').hidden = true; $('scndone').hidden = true;
+  setTool('look'); startView(); dirty = true; save(); updateUI(true);
+  sfx('toot'); toast(t('📂 Loaded! Welcome back.'));
+  return true;
+}
+function slotAct(act) {
+  const [k, n] = act.split(':'), key = k + ':' + n, sure = slotArmed === key;
+  slotArmed = null;
+  if (k === 'save') {
+    if (readSlot(n) && !sure) slotArmed = key;
+    else {
+      try { localStorage.setItem(slotKey(n), JSON.stringify(stamp(snapshot()))); sfx('coin'); toast(t('💾 Saved in slot {n}!', { n })); }
+      catch (e) { fail('Could not save here 😟'); }
+    }
+  } else if (k === 'load') {
+    if (!sure) slotArmed = key; else if (loadSave(readSlot(n))) return;
+  } else if (k === 'del') {
+    if (!sure) slotArmed = key; else { try { localStorage.removeItem(slotKey(n)); } catch (e) { /* nothing to remove */ } sfx('build'); }
+  }
+  renderSaves();
+}
+function exportSave() {
+  const d = stamp(snapshot()); delete d.thumb;
+  const name = t(scn().name).toLowerCase().replace(/[^a-z0-9åäö]+/g, '-').replace(/^-|-$/g, '') || 'valley';
+  const day = new Date().toISOString().slice(0, 10);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(d)], { type: 'application/json' }));
+  a.download = `puffwhistle-${name}-${day}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  sfx('coin'); toast(t('⬇️ Your valley was saved to a file!'));
+}
+function importSave(file) {
+  const r = new FileReader();
+  r.onload = () => { let d = null; try { d = JSON.parse(r.result); } catch (e) { /* not JSON */ } loadSave(d); };
+  r.onerror = () => fail("That save couldn't be opened 😟");
+  r.readAsText(file);
+}
+$('savebtn').addEventListener('click', () => { sfx('pop'); openSaves(); });
+$('saves').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.slot) slotAct(b.dataset.slot);
+  else if (b.id === 'saveexport') exportSave();
+  else if (b.id === 'saveimport') $('savefile').click();
+  else if (b.id === 'savesclose') $('saves').hidden = true;
+});
+$('savefile').addEventListener('change', e => { const file = e.target.files[0]; e.target.value = ''; if (file) importSave(file); });
 
 // ---------- main loop ----------
 function sim(dt) {
@@ -3032,7 +3129,7 @@ if (/[?&]debug\b/.test(location.search)) {
     setTool, produce, idx, KINDS, CARGO, save, load, undo, beginAct, endAct, placeDeco, draftStart, draftTo, draftCommit,
     darkness, seasonIx, gateDown, buyBus, sellBus, roadRoute, pick, panelAct, panelHTML, deliver, makeQuest,
     get sel() { return sel; }, set sel(v) { sel = v; },
-    get W() { return W; }, get H() { return H; }, view, zoomAt, centerOn, clampView, minScale, startScenario, openMaps, checkGoal, SCENARIOS, SIZES, sized, DIFFS, price, trainRun, busRun, payRunning, toggleSignal, updTaken, sigLimit, posAt, checkCrashes, rescueTrain, get taken() { return taken; }, get mapAdv() { return mapAdv; }, set mapAdv(v) { mapAdv = v; }, get mapDiff() { return mapDiff; }, set mapDiff(v) { mapDiff = v; }, get mapSize() { return mapSize; }, set mapSize(v) { mapSize = v; }, resize, get cars() { return cars; }, get undoStack() { return undoStack; }, get draft() { return draft; },
+    get W() { return W; }, get H() { return H; }, view, zoomAt, centerOn, clampView, minScale, startScenario, openMaps, checkGoal, SCENARIOS, SIZES, sized, DIFFS, price, trainRun, busRun, payRunning, toggleSignal, updTaken, sigLimit, posAt, checkCrashes, rescueTrain, get taken() { return taken; }, get mapAdv() { return mapAdv; }, set mapAdv(v) { mapAdv = v; }, get mapDiff() { return mapDiff; }, set mapDiff(v) { mapDiff = v; }, get mapSize() { return mapSize; }, snapshot, readSlot, slotAct, loadSave, openSaves, exportSave, SLOTS, set mapSize(v) { mapSize = v; }, resize, get cars() { return cars; }, get undoStack() { return undoStack; }, get draft() { return draft; },
   };
 }
 })();

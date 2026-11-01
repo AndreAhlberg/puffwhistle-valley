@@ -110,6 +110,20 @@
   #mapadv, #mapdiffs, #mapsizes { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
   #mapadv button, #mapdiffs button, #mapsizes button { background: #fff; border: 3px solid var(--line); border-radius: 14px; padding: 4px 12px; font-size: 16px; font-weight: 800; color: var(--ink); }
   #mapadv button.on, #mapdiffs button.on, #mapsizes button.on { background: #ffe28a; border-color: #f2b632; box-shadow: 0 3px 0 #d99a1c; }
+  #saves .card { max-width: 560px; width: 100%; }
+  #saves p.note { font-size: 15px; opacity: .8; }
+  #slots { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+  .slot { display: flex; align-items: center; gap: 10px; background: #fff; border: 3px solid var(--line); border-radius: 16px; padding: 8px 10px; text-align: left; }
+  .slot img { width: 84px; height: 52px; object-fit: cover; border-radius: 8px; image-rendering: pixelated; flex: none; }
+  .slot .big { font-size: 34px; width: 84px; text-align: center; flex: none; }
+  .slot .info { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; font-size: 14px; font-weight: 600; }
+  .slot .info b { font-size: 17px; font-weight: 800; }
+  .slot .info small { opacity: .65; font-size: 12px; }
+  .slot .sbtns { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; flex: none; max-width: 180px; }
+  .slot .sbtns button, .filebtns button { background: #fff; border: 3px solid var(--line); border-radius: 12px; padding: 4px 10px; font-size: 15px; font-weight: 800; color: var(--ink); }
+  .slot .sbtns button.armed { background: #ffe28a; border-color: #f2b632; }
+  .filebtns { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+  @media (max-width: 520px) { .slot { flex-wrap: wrap; } .slot .sbtns { max-width: none; width: 100%; } }
   #mapsizes small { font-weight: 600; opacity: .7; font-size: 12px; }
   #mapsgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; margin: 14px 0 6px; }
   #mapsgrid button { display: flex; flex-direction: column; align-items: center; gap: 4px; background: #fff; border: 4px solid var(--line); border-radius: 18px; padding: 10px; text-align: center; transition: transform .1s; }
@@ -160,6 +174,7 @@
   <button class="icon" id="sound" data-i18n-title="Sound on/off">🔊</button>
   <button class="icon" id="music" data-i18n-title="Music on/off">🎵</button>
   <button class="icon" id="lang" data-i18n-title="Switch language">🌐 Svenska</button>
+  <button class="icon" id="savebtn" data-i18n-title="Save and load" data-i18n>💾 Saves</button>
   <button class="icon" id="newmap" data-i18n-title="Start a new valley">🗺️ New map</button>
 </div>
 
@@ -200,6 +215,17 @@
   </div>
 </div>
 
+<div id="saves" class="modal" hidden>
+  <div class="card">
+    <h1 data-i18n>Saved games</h1>
+    <p class="note" data-i18n>Your valley also saves by itself all the time. Use the slots to keep different valleys.</p>
+    <div id="slots"></div>
+    <div class="filebtns"><button id="saveexport" data-i18n>⬇️ Save to a file</button><button id="saveimport" data-i18n>⬆️ Open a file</button></div>
+    <input type="file" id="savefile" accept=".json,application/json" hidden>
+    <button id="savesclose" class="plain" data-i18n>Close</button>
+  </div>
+</div>
+
 <div id="scndone" class="modal" hidden>
   <div class="card">
     <h1 data-i18n>Valley complete! 🏆</h1>
@@ -226,6 +252,6 @@
   </div>
 </div>
 
-<script src="game.js?v=2"></script>
+<script src="game.js?v=3"></script>
 </body>
 </html>

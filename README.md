@@ -33,6 +33,13 @@ Or open `index.html` in a browser. There's no build step and no server needed.
 - Keys: `1`–`7` pick tools, `Z` undoes, `Space` pauses, `Enter` sends off a new train, `Esc` cancels,
   arrow keys pan, `+`/`-` zoom and `0` shows the whole map.
 
+## Saving
+The game autosaves all the time, so closing the page never loses your valley. **💾 Saves** in the top bar has three
+save slots for keeping different valleys. Each slot shows a little map picture, the valley, coins, stars, trains and
+when it was saved. Replacing, loading or deleting a slot asks "Sure?" first. **⬇️ Save to a file** downloads the valley,
+and **⬆️ Open a file** loads one back, for example on another computer. A file that isn't a valley is refused and your
+current game stays as it was.
+
 ## Difficulty
 Pick a difficulty along with the map size when you start a new map. The top bar shows which one you're on.
 
