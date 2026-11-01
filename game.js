@@ -255,7 +255,7 @@ const SV = {
   'Buses 🚌 carry passengers along the roads between towns.': 'Bussar 🚌 kör passagerare längs vägarna mellan städerna.',
   'Click a train to make it toot! Paint it 🎨 in its panel.': 'Klicka på ett tåg så tutar det! Måla det 🎨 i dess panel.',
   'Toot toot!': 'Tut tut!', 'Beep beep!': 'Pip pip!', 'Quack!': 'Kvack!',
-  '🎨 Paint': '🎨 Måla', 'Rename': 'Byt namn', 'Train name': 'Tågets namn', 'Save name': 'Spara namnet', 'Colour': 'Färg', 'Pattern': 'Mönster', 'Face': 'Ansikte',
+  '🎨 Paint': '🎨 Måla', 'Rename': 'Byt namn', '✏️ Name': '✏️ Namn', 'Train name': 'Tågets namn', 'Save name': 'Spara namnet', 'Colour': 'Färg', 'Pattern': 'Mönster', 'Face': 'Ansikte',
   'Plain': 'Enfärgad', 'Stripes': 'Ränder', 'Spots': 'Prickar', 'Stars': 'Stjärnor', 'Unlocks at {n} ⭐': 'Låses upp vid {n} ⭐',
   'Bus': 'Buss', 'Bus {n}': 'Buss {n}',
   'Click a town to start a bus route. Buses drive on the roads 🚌': 'Klicka på en stad för att börja en busslinje. Bussar kör på vägarna 🚌',
@@ -356,7 +356,7 @@ const cache = document.createElement('canvas');
 let dpr = 1, dirty = true;
 const view = { s: 30, ox: 0, oy: 0 };
 let G = null;
-let tool = 'look', hover = null, hoverW = null, down = false, lastTile = null, sel = null, busDraft = -1, paintOpen = false, renaming = false;
+let tool = 'look', hover = null, hoverW = null, down = false, lastTile = null, sel = null, busDraft = -1, paintOpen = false, renaming = false, panelHeld = false;
 let routeDraft = [], draftEngine = 'puffer', speed = 1, muted = false, armed = null;
 const smoke = [], floaters = [], confetti = [], weather = [];
 let emo = [], cars = [], trainPts = [], animDeco = [], lights = [];
@@ -2426,7 +2426,7 @@ function panelHTML() {
     const sure = armed === 'sell' + tr.id;
     const head = renaming
       ? `<input id="rename" maxlength="${NAME_MAX}" value="${esc(tn(tr.name))}" aria-label="${t('Train name')}"><button data-act="nameok" title="${t('Save name')}">✔</button>`
-      : `${esc(tn(tr.name))} <button class="pen" data-act="rename" title="${t('Rename')}">✏️</button> <small>${tn(eng.name)}</small>`;
+      : `<button class="pen" data-act="rename" title="${t('Rename')}">${esc(tn(tr.name))} <i>✏️</i></button> <small>${tn(eng.name)}</small>`;
     return `<div class="ph"><span class="sw" style="background:${paintCss(tr.color)}"></span>${head}${close}</div>
       <div class="row">${status}</div>
       <div class="row"><b>${t('Route:')}</b> ${route}</div>
@@ -2434,7 +2434,7 @@ function panelHTML() {
       <div class="row"><b>${t('Wagons:')}</b> ${'🚃'.repeat(tr.wagons)}</div>
       <div class="row"><b>${t('Earned:')}</b> 🪙 ${tr.earned}${trainRun(tr) ? ` <small>· ${t('costs {n}🪙 a minute to run', { n: trainRun(tr) })}</small>` : ''}</div>
       <div class="btns"><button data-act="addw">${t('➕ Wagon')} ${price(COST.wagon)}🪙</button><button data-act="remw">${t('➖ Wagon')}</button>
-      <button data-act="paint" class="${paintOpen ? 'armed' : ''}">${t('🎨 Paint')}</button>
+      <button data-act="paint" class="${paintOpen ? 'armed' : ''}">${t('🎨 Paint')}</button><button data-act="rename">${t('✏️ Name')}</button>
       <button data-act="sell" class="${sure ? 'armed' : ''}">${t(sure ? 'Sure? 💰' : '💰 Sell')}</button>${G.adv && tr.sigWait > 6 ? `<button data-act="rescue">${t('✨ Rescue')}</button>` : ''}</div>
       ${paintOpen ? paintHTML(tr) : ''}`;
   }
@@ -2548,8 +2548,8 @@ function updateUI(force) {
     return `<div class="q"><div class="t" title="${questText(q)}">${questText(q)}</div><div class="bar"><i style="width:${pr / q.n * 100}%"></i></div><small>${t('{p} / {n} · reward ⭐ + {r}🪙', { p: pr, n: q.n, r: q.reward })}</small></div>`;
   }).join(''));
   const ph = panelHTML();
-  // keep the name box alive while typing
-  if (!(renaming && document.activeElement && document.activeElement.id === 'rename')) { $('panel').hidden = !ph; setHTML('panel', ph); }
+  // keep the name box alive while typing, and buttons alive mid-click
+  if (!panelHeld && !(renaming && document.activeElement && document.activeElement.id === 'rename')) { $('panel').hidden = !ph; setHTML('panel', ph); }
   $('routebar').hidden = tool !== 'train';
   if (tool === 'train') setHTML('routebar', routeBarHTML());
   $('decobar').hidden = tool !== 'deco';
@@ -2807,6 +2807,9 @@ $('music').addEventListener('click', () => {
   try { localStorage.setItem(MUSIC_KEY, musicOn ? 'on' : 'off'); } catch (e) { /* not remembered */ }
   updateUI();
 });
+$('panel').addEventListener('pointerdown', () => { panelHeld = true; });
+addEventListener('pointerup', () => { panelHeld = false; });
+addEventListener('pointercancel', () => { panelHeld = false; });
 $('panel').addEventListener('keydown', e => {
   if (e.target.id !== 'rename') return;
   const tr = sel && sel.type === 'train' && trById(sel.id);

@@ -21,8 +21,8 @@ Or open `index.html` in a browser. There's no build step and no server needed.
 - **🌷 Decorate**: flowers, trees, fences (they join up), benches, lamp posts (they glow at night), duck
   ponds, windmills, and snowmen (winter only; they melt in spring). Drag to place lots.
 - **👆 Look**: click trains, buses, stations, towns and industries. Add or remove wagons, or sell a train
-  or bus. Clicking makes things honk: trains toot, cars and buses beep, ducks quack. Press ✏️ next to a
-  train's name to rename it (Enter saves, Esc cancels).
+  or bus. Clicking makes things honk: trains toot, cars and buses beep, ducks quack. Press **✏️ Name** (or
+  click the train's name) to rename it; Enter saves, Esc cancels.
 - **🎨 Paint** (in a train's panel): colours, patterns and faces. Fancier ones unlock with ⭐ stars:
   black at 1, gold at 2, pink at 3 and rainbow at 5; stripes at 1, spots at 2 and stars at 4; the 😮 face at
   1 and the 😎 face at 3.
