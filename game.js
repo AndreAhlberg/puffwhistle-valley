@@ -8,7 +8,7 @@ const MAX_S = 72; // most zoomed-in: CSS pixels per tile
 const DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0]; // N E S W
 const OPP = d => (d + 2) & 3;
 const GRASS = 0, WATER = 1, TREE = 2, HILL = 3;
-const COST = { track: 2, bridge: 8, tunnel: 6, station: 15, wagon: 10, signal: 12, road: 3, roadBridge: 10 };
+const COST = { track: 2, bridge: 8, tunnel: 6, station: 15, wagon: 10, signal: 12, road: 3, roadBridge: 10, dock: 20 };
 const CATCH = 2, WAGON_CAP = 8, MAX_WAGONS = 6, GAP = 0.58, ENG_LEN = 0.62, STN_CAP = 60, PROD_EVERY = 5;
 const SEASON_LEN = 150, DAY_LEN = 120, NIGHT_DARK = 0.5, UNDO_MAX = 30;
 const SAVE_KEY = 'puffwhistle-save-v1', MUSIC_KEY = 'puffwhistle-music';
@@ -46,11 +46,17 @@ const PAINT_COLORS = [...['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6',
 const PATTERNS = [{ id: 'plain', name: 'Plain', stars: 0 }, { id: 'stripes', name: 'Stripes', stars: 1 }, { id: 'spots', name: 'Spots', stars: 2 }, { id: 'stars', name: 'Stars', stars: 4 }];
 const FACES = [{ id: 'none', e: '—', stars: 0 }, { id: 'smile', e: '🙂', stars: 0 }, { id: 'wow', e: '😮', stars: 1 }, { id: 'cool', e: '😎', stars: 3 }];
 const COST_BUS = 40, BUS_CAP = 10, BUS_SPEED = 1.5;
+// Boats sail between docks. Ferries take passengers; cargo ships take everything else.
+const BOATS = {
+  ferry: { name: 'Ferry', e: '⛴️', cost: 45, cap: 16, speed: 1.5, takes: t => t === 'people' },
+  cargo: { name: 'Cargo ship', e: '🚢', cost: 70, cap: 24, speed: 1.1, takes: t => t !== 'people' },
+};
+const BOAT_COLS = ['#e74c3c', '#2d98da', '#20bf6b', '#f39c12', '#9b59b6'];
 // Maps. Free play has no goal; scenarios have one, rated ⭐⭐⭐/⭐⭐/⭐ by game time (par = 3-star and 2-star limits).
 // ind = how many of each industry; extra = more industries; season = locked season.
 const SCENARIOS = {
   free:      { e: '🗺️', name: 'Free play', desc: 'A random valley. Build whatever you like!', w: 72, h: 44, towns: 7, ind: 2, hills: 7, rivers: 2, ponds: 3 },
-  islands:   { e: '🏝️', name: 'Island Hop', desc: 'Towns on little islands. Build bridges to join them up!', w: 64, h: 40, islands: 13, towns: 6, ind: 1, hills: 2, coins: 450,
+  islands:   { e: '🏝️', name: 'Island Hop', desc: 'Towns on little islands. Build bridges, or sail between them with boats!', w: 64, h: 40, islands: 13, towns: 6, ind: 1, hills: 2, coins: 450,
     goal: { kind: 'grow', n: 12 }, par: [900, 1500] },
   mountains: { e: '⛰️', name: 'Mountain Railway', desc: 'Big hills everywhere. Dig tunnels and make bricks!', w: 64, h: 40, towns: 5, ind: 1, hills: 15, hillR: 1.7, rivers: 1, coins: 400,
     extra: ['quarry', 'bricks'], goal: { kind: 'deliver', type: 'bricks', n: 60 }, par: [900, 1500] },
@@ -107,6 +113,7 @@ const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#e84393'
 const ROOFS = ['#e8584f', '#f39c3d', '#5b8def', '#9b6bd6', '#e86fa8', '#3fb38f', '#d9534f'];
 const TOWN_NAMES = ['Maple Town', 'Puddleby', 'Honeyhill', 'Pebble Cove', 'Sunnyvale', 'Bramble End', 'Little Wick', 'Cloverdale', 'Button Bay', 'Muffin Hill', 'Duckford', 'Teacup Green'];
 const TIPS = [
+  'Boats sail on rivers and the sea. Build a ⚓ dock on each shore, then add a ⛴️ ferry or a 🚢 cargo ship!',
   'Bakeries turn 🌾 wheat and 🥛 milk into 🧁 cupcakes. Cupcakes are worth lots of coins!',
   'Toy Workshops turn 🪵 logs into 🧸 toys. Towns love toys!',
   'Towns grow bigger when trains bring them goods. 🏠',
@@ -266,11 +273,30 @@ const SV = {
   'Beep beep! {name} is on its way! 🚌': 'Pip pip! {name} är på väg! 🚌',
   '🚌 Driving': '🚌 Kör', '🧒 At the bus stop': '🧒 Vid hållplatsen',
   'Pick a valley': 'Välj en dal', 'Free play': 'Fritt spel', 'A random valley. Build whatever you like!': 'En slumpad dal. Bygg vad du vill!',
-  'Island Hop': 'Öhoppet', 'Towns on little islands. Build bridges to join them up!': 'Städer på små öar. Bygg broar och koppla ihop dem!',
+  'Island Hop': 'Öhoppet', 'Towns on little islands. Build bridges, or sail between them with boats!': 'Städer på små öar. Bygg broar, eller segla mellan dem med båtar!',
   'Mountain Railway': 'Bergsbanan', 'Big hills everywhere. Dig tunnels and make bricks!': 'Stora kullar överallt. Gräv tunnlar och gör tegel!',
   'Snowy Valley': 'Snödalen', 'It is always winter. Towns need lots of milk for hot cocoa!': 'Det är alltid vinter. Städerna behöver massor av mjölk till varm choklad!',
   'Busy Towns': 'Myllrande städer', 'Lots of towns and roads. Carry passengers by train and bus!': 'Massor av städer och vägar. Kör passagerare med tåg och buss!',
   'Goal:': 'Mål:', 'Best:': 'Bästa:', 'Cancel': 'Avbryt',
+  '🗺️ Route': '🗺️ Rutt', '📦 Goods': '📦 Varor', '{name} has a new route! 🗺️': '{name} har en ny rutt! 🗺️',
+  '🗺️ New route for {name}': '🗺️ Ny rutt för {name}', '✔ Save route': '✔ Spara rutten', 'Take this stop off': 'Ta bort det här stoppet',
+  'Click stations to add them to the route, and ✕ to take a stop off. Then press ✔ Save route.': 'Klicka på stationer för att lägga till dem i rutten och på ✕ för att ta bort ett stopp. Tryck sedan ✔ Spara rutten.',
+  'Nothing on this route to choose between yet.': 'Det finns inget att välja mellan på den här rutten än.',
+  '⭐ Priority goods': '⭐ Viktiga varor', 'load first, in this order': 'lastas först, i den här ordningen',
+  '✅ Only carry ⭐ goods': '✅ Kör bara ⭐ varor', '⬜ Only carry ⭐ goods': '⬜ Kör bara ⭐ varor', 'Priority:': 'Viktigast:', 'only these': 'bara de här',
+  'Boats': 'Båtar', 'Dock': 'Brygga', 'Ferry': 'Färja', 'Cargo ship': 'Lastfartyg', 'Ferry {n}': 'Färja {n}', 'Cargo ship {n}': 'Lastfartyg {n}',
+  'Docks go on the water, right next to the shore! ⚓': 'Bryggor byggs på vattnet, precis vid stranden! ⚓', 'A bridge is in the way! ⚓': 'En bro är i vägen! ⚓',
+  'Nothing is near this dock. Try inside the yellow square!': 'Inget finns nära den här bryggan. Prova inom den gula rutan!',
+  "Boats can't sail between those docks. The water isn't joined up! 🌊": 'Båtar kan inte segla mellan de bryggorna. Vattnet hänger inte ihop! 🌊',
+  '{name} sets sail! {e}': '{name} sätter segel! {e}', '{name} went back to the boatyard.': '{name} åkte tillbaka till varvet.',
+  'Click on a dock! ⚓': 'Klicka på en brygga! ⚓', "Trains can't go to a dock! Use ⛴️ Boats.": 'Tåg kan inte åka till en brygga! Använd ⛴️ Båtar.',
+  'A ⚓ dock is in the way!': 'En ⚓ brygga är i vägen!', 'Hoot hoot!': 'Tuut tuut!',
+  'Click on the water right next to the shore to build a ⚓ dock. It picks up from everything in the yellow square.': 'Klicka på vattnet precis vid stranden för att bygga en ⚓ brygga. Den hämtar från allt i den gula rutan.',
+  'Click the dock where your boat should start. ⛴️ Ferries carry passengers, 🚢 cargo ships carry goods.': 'Klicka på bryggan där båten ska börja. ⛴️ Färjor kör passagerare, 🚢 lastfartyg kör varor.',
+  'Now click another dock across the water!': 'Klicka nu på en annan brygga på andra sidan vattnet!',
+  "❓ Can't find a way over the water": '❓ Hittar ingen väg över vattnet', '🌊 Sailing': '🌊 Seglar', '⚓ At the dock': '⚓ Vid bryggan',
+  'Carries passengers 🧒': 'Kör passagerare 🧒', 'Carries goods, not passengers': 'Kör varor, inte passagerare', 'no boats yet': 'inga båtar än', 'Boats:': 'Båtar:',
+  'Boats sail on rivers and the sea. Build a ⚓ dock on each shore, then add a ⛴️ ferry or a 🚢 cargo ship!': 'Båtar seglar på floder och havet. Bygg en ⚓ brygga på varje strand och lägg till en ⛴️ färja eller ett 🚢 lastfartyg!',
   '📋 Save as text (JSON)': '📋 Spara som text (JSON)', '📋 Copy': '📋 Kopiera', '📥 Load this text': '📥 Ladda den här texten', 'Sure? 📥': 'Säker? 📥',
   'Press Copy to get your valley as text, or paste a saved valley here and load it.': 'Tryck Kopiera för att få din dal som text, eller klistra in en sparad dal här och ladda den.',
   '📋 Copied! Paste it anywhere to keep it.': '📋 Kopierat! Klistra in den var som helst för att spara den.', 'Select the text and copy it yourself.': 'Markera texten och kopiera den själv.',
@@ -340,6 +366,8 @@ function t(en, vars) {
 function tn(name) {
   if (lang !== 'sv' || !name) return name;
   if (NAMES_SV[name]) return NAMES_SV[name];
+  const dk = /^(.*) Dock( \d+)?$/.exec(name);
+  if (dk) return `${tn(dk[1])} brygga${dk[2] || ''}`;
   const m = /^(.*) (North|East|South|West)( \d+)?$/.exec(name);
   if (m) return `${tn(m[1])} ${SIDES_SV[m[2]]}${m[3] || ''}`;
   const num = /^(.*) (\d+)$/.exec(name); // a second "Sunny Farm 2" on a big map
@@ -374,7 +402,7 @@ const cache = document.createElement('canvas');
 let dpr = 1, dirty = true;
 const view = { s: 30, ox: 0, oy: 0 };
 let G = null;
-let tool = 'look', hover = null, hoverW = null, down = false, lastTile = null, sel = null, busDraft = -1, paintOpen = false, renaming = false, panelHeld = false;
+let tool = 'look', hover = null, hoverW = null, down = false, lastTile = null, sel = null, busDraft = -1, boatMode = 'dock', boatDraft = -1, editTrain = -1, goodsOpen = false, paintOpen = false, renaming = false, panelHeld = false;
 let routeDraft = [], draftEngine = 'puffer', speed = 1, muted = false, armed = null;
 const smoke = [], floaters = [], confetti = [], weather = [];
 let emo = [], cars = [], trainPts = [], animDeco = [], lights = [];
@@ -402,7 +430,7 @@ function newGame(seed, scnId = 'free', size = 'big', diff = 'easy', adv = false)
     v: 1, seed, W, H, scn: { id: SCENARIOS[scnId] ? scnId : 'free', size, done: false }, diff, adv: !!adv, coins: Math.round((S.coins || 250) * DIFFS[diff].start / 10) * 10, runT: 0, stars: 0, time: 0, prodT: 0, nextId: 1, nameIx: 0, rr: 0, piggyAt: -999,
     terr: new Uint8Array(W * H), conn: new Uint8Array(W * H), road: new Uint8Array(W * H), deco: new Uint8Array(W * H), sig: new Uint8Array(W * H),
     occ: new Int16Array(W * H).fill(-1), stn: new Int32Array(W * H).fill(-1),
-    places: [], stations: [], trains: [], roads: [], buses: [], busN: 0, stats: { delivered: {}, earned: 0 }, quests: [],
+    places: [], stations: [], trains: [], roads: [], buses: [], busN: 0, boats: [], boatN: 0, stats: { delivered: {}, earned: 0 }, quests: [],
   };
   genMap(seed, S);
   initCars(); undoStack.length = 0; curSeason = -1; draft = null; view.init = false; sigDirty = true; wrecks = [];
@@ -542,7 +570,7 @@ function roadPath(a, b) {
   const ok = i => i >= 0 && G.occ[i] < 0 && G.terr[i] !== HILL;
   const ends = p => { const s = new Set(); for (const i of p.tiles) for (let d = 0; d < 4; d++) { const n = nb(i, d); if (ok(n) && G.terr[n] !== WATER) s.add(n); } return s; };
   const S = ends(a), T = ends(b);
-  const dist = new Float32Array(W * H * 4).fill(Infinity), prev = new Int32Array(W * H * 4).fill(-1), heap = [];
+  const dist = new Float64Array(W * H * 4).fill(Infinity), prev = new Int32Array(W * H * 4).fill(-1), heap = [];
   for (const i of S) for (let d = 0; d < 4; d++) { dist[i * 4 + d] = 0; heapPush(heap, [0, i * 4 + d]); }
   let found = -1;
   while (heap.length) {
@@ -620,6 +648,7 @@ function roadLinkCost(a, d, pend) {
   if (G.occ[a] >= 0 || G.occ[b] >= 0) return { err: "Roads can't go through buildings!" };
   if (G.terr[a] === HILL || G.terr[b] === HILL) return { err: 'Roads go around hills, not through them! ⛰️' };
   if (G.deco[a] || G.deco[b]) return { err: 'Something pretty is in the way! Tidy it with 🧹 first.' };
+  if ((G.stn[a] >= 0 && stById(G.stn[a]).dock) || (G.stn[b] >= 0 && stById(G.stn[b]).dock)) return { err: 'A ⚓ dock is in the way!' };
   for (const [i, e] of [[a, d], [b, OPP(d)]]) {
     const c = G.conn[i]; if (!c) continue;
     if (G.stn[i] >= 0) return { err: "Roads can't go through a station! 🚉" };
@@ -689,7 +718,8 @@ function beginAct() {
   act = {
     changed: false, coins: G.coins, terr: G.terr.slice(), conn: G.conn.slice(), deco: G.deco.slice(), sig: G.sig.slice(),
     road: G.road.slice(), roads: G.roads.slice(), buses: G.buses.slice(),
-    stations: G.stations.map(({ id, x, y, name, cargo }) => ({ id, x, y, name, cargo: { ...cargo } })),
+    stations: G.stations.map(({ id, x, y, name, cargo, dock }) => ({ id, x, y, name, cargo: { ...cargo }, dock })),
+    boats: G.boats.slice(),
     routes: G.trains.map(tr => [tr.id, tr.route.slice()]), trains: G.trains.slice(),
   };
 }
@@ -699,6 +729,8 @@ function endAct() {
   a.spent = a.coins - G.coins;
   a.lost = a.trains.filter(tr => !G.trains.includes(tr));
   a.lostBuses = a.buses.filter(b => !G.buses.includes(b));
+  a.lostBoats = a.boats.filter(b => !G.boats.includes(b));
+  delete a.boats;
   delete a.buses;
   delete a.trains;
   undoStack.push(a);
@@ -724,12 +756,13 @@ function undo() {
     G.conn[i] = 0; G.road[i] = 0; G.deco[i] = 0; G.terr[i] = GRASS;
   }
   if (roadUndone) { initCars(); roadsChanged(); }
-  G.stations = a.stations.filter(s => G.occ[idx(s.x, s.y)] < 0 && G.conn[idx(s.x, s.y)])
+  G.stations = a.stations.filter(s => G.occ[idx(s.x, s.y)] < 0 && (s.dock ? G.terr[idx(s.x, s.y)] === WATER : G.conn[idx(s.x, s.y)]))
     .map(s => ({ ...s, cargo: (stById(s.id) || s).cargo, places: [] }));
   G.stn.fill(-1);
   for (const s of G.stations) G.stn[idx(s.x, s.y)] = s.id;
   refreshCatch();
   for (const tr of a.lost) if (!tr.crashed) G.trains.push(tr);
+  for (const bt of a.lostBoats) if (bt.route.every(id => stById(id))) { G.boats.push(bt); dockBoat(bt, stById(bt.target) || stById(bt.route[0])); }
   for (const [id, route] of a.routes) { const tr = trById(id); if (tr) tr.route = route; }
   for (const tr of G.trains.slice()) {
     tr.route = tr.route.filter(id => stById(id));
@@ -787,7 +820,7 @@ function buildStation(i) {
   let best = null, bd = 1e9;
   for (const p of G.places) { const d = Math.hypot(p.cx - x - 0.5, p.cy - y - 0.5); if (d < bd) { bd = d; best = p; } }
   let name = best && bd < 9 ? best.name : 'Meadow';
-  if (G.stations.some(s => s.name === name)) {
+  if (G.stations.some(s => s.name === name && !s.dock)) {
     const dx = x + 0.5 - (best ? best.cx : 0), dy = y + 0.5 - (best ? best.cy : 0);
     const side = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'East' : 'West') : (dy > 0 ? 'South' : 'North');
     let n = `${name} ${side}`, k = 2;
@@ -832,7 +865,8 @@ function removeStation(id) {
   const st = stById(id); if (!st) return;
   G.stn[idx(st.x, st.y)] = -1;
   G.stations = G.stations.filter(s => s !== st);
-  G.coins += Math.floor(price(COST.station) / 2);
+  G.coins += Math.floor(price(st.dock ? COST.dock : COST.station) / 2);
+  for (const bt of G.boats.slice()) if (bt.route.includes(id)) { sellBoat(bt); toast(t('{name} went back to the boatyard.', { name: boatName(bt) })); }
   for (const tr of G.trains.slice()) {
     if (!tr.route.includes(id)) continue;
     tr.route = tr.route.filter(r => r !== id);
@@ -856,7 +890,7 @@ function supplies(st) {
 
 // ---------- trains ----------
 const trainLen = tr => ENG_LEN + tr.wagons * GAP;
-const capacity = tr => tr.wagons * WAGON_CAP;
+const capacity = tr => tr.boat ? BOATS[tr.boat].cap : tr.wagons * WAGON_CAP;
 const loaded = tr => tr.load.reduce((a, l) => a + l.n, 0);
 
 function buyTrain(route, engId) {
@@ -891,6 +925,44 @@ function sellTrain(tr) {
   G.trains = G.trains.filter(t => t !== tr);
   if (sel && sel.type === 'train' && sel.id === tr.id) sel = null;
 }
+
+// A new list of stops for a train that's already running. It finishes the trip it's on, then follows the new route
+// (a stop that was taken off just sends it on to the first stop of the new one).
+function setRoute(tr, route) {
+  route = route.filter(id => stById(id) && !stById(id).dock);
+  if (route.length < 2) return fail('A train needs at least two stations!');
+  tr.route = route.slice();
+  undoStack.length = 0; // older undo steps would put the old route back
+  if (tr.state === 'lost') tr.timer = Math.min(tr.timer, 0.2);
+  sfx('toot'); toast(t('{name} has a new route! 🗺️', { name: tn(tr.name) }));
+  return true;
+}
+// Goods that one stop on the route sends and another stop wants, so they're worth choosing between.
+function routeGoods(v) {
+  const out = new Set();
+  for (const a of v.route) {
+    const sa = stById(a); if (!sa) continue;
+    for (const ty of supplies(sa)) for (const b of v.route) { const sb = b !== a && stById(b); if (sb && accepts(sb).has(ty)) out.add(ty); }
+  }
+  for (const ty of v.prio || []) out.add(ty);
+  return Object.keys(CARGO).filter(ty => out.has(ty) && (!v.boat || BOATS[v.boat].takes(ty)));
+}
+function goodsHTML(v) {
+  const list = routeGoods(v), prio = v.prio || [];
+  if (!list.length) return `<div class="row"><small>${t('Nothing on this route to choose between yet.')}</small></div>`;
+  const chips = list.map(ty => { const n = prio.indexOf(ty) + 1; return `<button data-act="prio:${ty}" class="${n ? 'on' : ''}">${n ? `⭐${n} ` : ''}${CARGO[ty].e} ${cname(ty)}</button>`; }).join('');
+  return `<div class="row"><b>${t('⭐ Priority goods')}</b> <small>${t('load first, in this order')}</small></div><div class="pal">${chips}</div>
+    <div class="pal"><button data-act="only" class="${v.only ? 'on' : ''}" ${prio.length ? '' : 'disabled'}>${t(v.only ? '✅ Only carry ⭐ goods' : '⬜ Only carry ⭐ goods')}</button></div>`;
+}
+function goodsAct(v, act) {
+  if (act === 'only') { v.only = !v.only; sfx('pop'); return; }
+  const ty = act.slice(5); if (!CARGO[ty]) return;
+  const p = v.prio = (v.prio || []).slice(), k = p.indexOf(ty);
+  if (k >= 0) p.splice(k, 1); else p.push(ty);
+  if (!p.length) v.only = false;
+  sfx('pop');
+}
+const prioRow = v => (v.prio || []).length ? `<div class="row"><b>${t('Priority:')}</b> ${v.prio.map(ty => CARGO[ty] ? CARGO[ty].e : '').join(' ')}${v.only ? ` <small>(${t('only these')})</small>` : ''}</div>` : '';
 
 // Parks the train on tile i with its wagons stretched back along the track.
 function placeAt(tr, i) {
@@ -1176,6 +1248,174 @@ function drawSignals() {
   for (const w of wrecks) emo.push(['💥', w.x, w.y - w.t * 0.2, 0.9 - w.t * 0.2]);
 }
 
+// ---------- docks and boats ----------
+// A dock is a station on the water, right by the shore. Boats sail from dock to dock and load like trains do.
+const landDir = i => [0, 1, 2, 3].find(d => { const n = nb(i, d); return n >= 0 && G.terr[n] !== WATER; }) ?? -1;
+const dockOk = i => G.terr[i] === WATER && !G.conn[i] && !G.road[i] && G.stn[i] < 0 && landDir(i) >= 0;
+function buildDock(i) {
+  if (G.stn[i] >= 0) return false;
+  if (G.terr[i] !== WATER || landDir(i) < 0) return fail('Docks go on the water, right next to the shore! ⚓');
+  if (G.conn[i] || G.road[i]) return fail('A bridge is in the way! ⚓');
+  if (G.coins < price(COST.dock)) return fail('Not enough coins 🪙');
+  const x = tx(i), y = ty(i);
+  let best = null, bd = 1e9;
+  for (const p of G.places) { const d = Math.hypot(p.cx - x - 0.5, p.cy - y - 0.5); if (d < bd) { bd = d; best = p; } }
+  const base = `${best && bd < 9 ? best.name : 'Meadow'} Dock`;
+  let name = base, k = 2;
+  while (G.stations.some(s => s.name === name)) name = `${base} ${k++}`;
+  G.coins -= price(COST.dock);
+  const st = { id: G.nextId++, x, y, name, cargo: {}, places: [], dock: true };
+  G.stations.push(st); G.stn[i] = st.id;
+  refreshCatch(); touch(); dirty = true; sfx('pop'); puff(x + 0.5, y + 0.5, 6, '#bfe2f4');
+  if (!st.places.length) toast(t('Nothing is near this dock. Try inside the yellow square!'));
+  return true;
+}
+// Shortest way over water, 8 directions without cutting corners, keeping a little off the shore.
+function waterPath(a, b) {
+  if (a === b) return null;
+  const dist = new Float64Array(W * H).fill(Infinity), prev = new Int32Array(W * H).fill(-1), heap = [[0, a]];
+  const wet = (x, y) => inB(x, y) && G.terr[idx(x, y)] === WATER;
+  dist[a] = 0;
+  while (heap.length) {
+    const [c, i] = heapPop(heap);
+    if (c > dist[i]) continue;
+    if (i === b) break;
+    const x = tx(i), y = ty(i);
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if ((!dx && !dy) || !wet(x + dx, y + dy) || (dx && dy && (!wet(x + dx, y) || !wet(x, y + dy)))) continue;
+      const n = idx(x + dx, y + dy), nc = c + (dx && dy ? 1.414 : 1) + (landDir(n) >= 0 && n !== b ? 0.5 : 0);
+      if (nc < dist[n]) { dist[n] = nc; prev[n] = i; heapPush(heap, [nc, n]); }
+    }
+  }
+  if (!isFinite(dist[b])) return null;
+  const path = [];
+  for (let k = b; k >= 0; k = prev[k]) path.push(k);
+  return path.reverse();
+}
+// Rounds the corners of a tile-by-tile course so boats glide.
+function smoothPts(pts) {
+  for (let it = 0; it < 2; it++) {
+    const out = [pts[0]];
+    for (let k = 0; k < pts.length - 1; k++) {
+      const [ax, ay] = pts[k], [bx, by] = pts[k + 1];
+      out.push([ax * 0.75 + bx * 0.25, ay * 0.75 + by * 0.25], [ax * 0.25 + bx * 0.75, ay * 0.25 + by * 0.75]);
+    }
+    out.push(pts[pts.length - 1]); pts = out;
+  }
+  return pts;
+}
+const boatById = id => G.boats.find(b => b.id === id);
+const boatName = bt => t(bt.boat === 'ferry' ? 'Ferry {n}' : 'Cargo ship {n}', { n: bt.n });
+const boatRun = bt => Math.round((BOATS[bt.boat].cost * 0.12 + 2) * D().run);
+function dockBoat(bt, st) {
+  bt.target = st.id; bt.state = 'stop'; bt.timer = 1;
+  bt.trail = mkTrail([center(idx(st.x, st.y))]); bt.s = 0; bt.a = bt.a || 0; bt.wakeT = 0;
+}
+function buyBoat(kind, a, b) {
+  const B = BOATS[kind], sa = stById(a), sb = stById(b);
+  if (!B || !sa || !sb || !sa.dock || !sb.dock) return false;
+  if (!waterPath(idx(sa.x, sa.y), idx(sb.x, sb.y))) return fail("Boats can't sail between those docks. The water isn't joined up! 🌊");
+  if (G.coins < price(B.cost)) return fail('Not enough coins 🪙');
+  G.coins -= price(B.cost);
+  undoStack.length = 0; // like trains, undo only reaches back to the last boat bought
+  G.boatN = (G.boatN || 0) + 1;
+  const bt = { id: G.nextId++, boat: kind, n: G.boatN, route: [a, b], target: a, load: [], earned: 0, color: BOAT_COLS[(G.boatN - 1) % BOAT_COLS.length] };
+  dockBoat(bt, sa);
+  G.boats.push(bt);
+  sel = { type: 'boat', id: bt.id };
+  sfx('toot'); puff(sa.x + 0.5, sa.y + 0.5, 8, '#ffffff');
+  toast(t('{name} sets sail! {e}', { name: boatName(bt), e: B.e }));
+  return true;
+}
+function sellBoat(bt) {
+  G.coins += Math.floor(price(BOATS[bt.boat].cost) / 2);
+  const p = posAt(bt.trail, bt.s); puff(p.x, p.y, 8, '#ffffff');
+  G.boats = G.boats.filter(b => b !== bt);
+  if (sel && sel.type === 'boat' && sel.id === bt.id) sel = null;
+}
+function updBoat(bt, dt) {
+  if (bt.state !== 'run') {
+    bt.timer -= dt; if (bt.timer > 0) return;
+    const from = stById(bt.target), nextId = bt.route[(bt.route.indexOf(bt.target) + 1) % bt.route.length], to = stById(nextId);
+    const path = from && to && waterPath(idx(from.x, from.y), idx(to.x, to.y));
+    if (!path) { bt.state = 'lost'; bt.timer = 3; return; }
+    bt.trail = mkTrail(smoothPts(path.map(center))); bt.s = 0; bt.target = nextId; bt.state = 'run';
+    return;
+  }
+  bt.s += BOATS[bt.boat].speed * dt;
+  bt.wakeT -= dt;
+  if (bt.wakeT <= 0) {
+    bt.wakeT = 0.18;
+    const a = angAt(bt.trail, bt.s), p = posAt(bt.trail, bt.s - 0.4);
+    smoke.push({ x: p.x, y: p.y, vx: -Math.cos(a) * 0.1, vy: -Math.sin(a) * 0.1, r: 0.06, life: 0, max: 0.9, col: '#e8f6ff' });
+  }
+  if (bt.s >= trailEnd(bt)) {
+    bt.s = trailEnd(bt); bt.state = 'stop';
+    const st = stById(bt.target);
+    bt.timer = 1.5 + (st ? serve(bt, st) : 0) * 0.04;
+  }
+}
+function boatToolClick(tile) {
+  if (boatMode === 'dock') { buildDock(tile.i); return; }
+  const id = G.stn[tile.i], st = id >= 0 && stById(id);
+  if (!st || !st.dock) { toast(t('Click on a dock! ⚓')); return; }
+  if (boatDraft < 0 || boatDraft === id) { boatDraft = id; sfx('pop'); }
+  else if (buyBoat(boatMode, boatDraft, id)) { boatDraft = -1; setTool('look'); return; }
+  updateUI(true);
+}
+function boatBarHTML() {
+  const opts = [['dock', '⚓', 'Dock', COST.dock], ['ferry', BOATS.ferry.e, 'Ferry', BOATS.ferry.cost], ['cargo', BOATS.cargo.e, 'Cargo ship', BOATS.cargo.cost]];
+  return `<div class="eng">${opts.map(([id, e, name, cost]) => `<button data-boat="${id}" class="${id === boatMode ? 'on' : ''}"><span class="be">${e}</span>${t(name)}<small>${price(cost)}🪙</small></button>`).join('')}</div>`;
+}
+// Drawn in the boat's own frame, facing +x.
+function drawBoatBody(bt) {
+  const ferry = bt.boat === 'ferry', L = ferry ? 0.46 : 0.52, Wd = ferry ? 0.2 : 0.22;
+  const hull = () => { ctx.beginPath(); ctx.moveTo(-L, -Wd); ctx.lineTo(L * 0.55, -Wd); ctx.quadraticCurveTo(L, -Wd * 0.6, L + 0.06, 0); ctx.quadraticCurveTo(L, Wd * 0.6, L * 0.55, Wd); ctx.lineTo(-L, Wd); ctx.closePath(); };
+  ctx.save(); ctx.translate(0.04, 0.06); hull(); ctx.fillStyle = 'rgba(0,40,80,0.25)'; ctx.fill(); ctx.restore();
+  hull(); ctx.fillStyle = ferry ? '#ffffff' : bt.color; ctx.fill();
+  ctx.strokeStyle = ferry ? '#8aa0b4' : shade(bt.color, -0.4); ctx.lineWidth = 0.03; ctx.stroke();
+  if (ferry) {
+    ctx.fillStyle = bt.color; ctx.fillRect(-L, -Wd, L * 1.5, 0.05); ctx.fillRect(-L, Wd - 0.05, L * 1.5, 0.05);
+    rr(ctx, -0.3, -0.12, 0.46, 0.24, 0.06); ctx.fillStyle = '#f4f1e8'; ctx.fill(); ctx.strokeStyle = '#9aa7b2'; ctx.lineWidth = 0.02; ctx.stroke();
+    ctx.fillStyle = '#7cc8f0'; for (let k = 0; k < 4; k++) ctx.fillRect(-0.26 + k * 0.1, -0.09, 0.06, 0.04), ctx.fillRect(-0.26 + k * 0.1, 0.05, 0.06, 0.04);
+    ctx.fillStyle = bt.color; ctx.beginPath(); ctx.arc(-0.05, 0, 0.065, 0, 7); ctx.fill();
+    ctx.fillStyle = '#333'; ctx.beginPath(); ctx.arc(-0.05, 0, 0.03, 0, 7); ctx.fill();
+  } else {
+    ctx.fillStyle = '#c9a477'; ctx.fillRect(-L + 0.05, -Wd + 0.05, L * 1.45, Wd * 2 - 0.1);
+    const n = Math.ceil(Math.min(1, loaded(bt) / capacity(bt)) * 6), cols = ['#e74c3c', '#f39c12', '#2ecc71', '#3498db', '#9b59b6', '#16a085'];
+    for (let k = 0; k < n; k++) { const cx = -L + 0.08 + (k >> 1) * 0.2, cy = (k & 1) ? 0.01 : -0.14; ctx.fillStyle = cols[(bt.id + k) % cols.length]; ctx.fillRect(cx, cy, 0.17, 0.13); ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 0.015; ctx.strokeRect(cx, cy, 0.17, 0.13); }
+    rr(ctx, L * 0.25, -0.13, 0.16, 0.26, 0.04); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.strokeStyle = '#9aa7b2'; ctx.lineWidth = 0.02; ctx.stroke();
+    ctx.fillStyle = '#7cc8f0'; ctx.fillRect(L * 0.25 + 0.11, -0.1, 0.03, 0.2);
+  }
+  if (sel && sel.type === 'boat' && sel.id === bt.id) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.05; ctx.beginPath(); ctx.arc(0, 0, 0.62, 0, 7); ctx.stroke(); }
+}
+function drawBoat(bt) {
+  const p = posAt(bt.trail, bt.s);
+  if (bt.trail.length > 1) bt.a = angAt(bt.trail, clamp(bt.s, 0.2, trailEnd(bt) - 0.2));
+  const bob = Math.sin(performance.now() / 500 + bt.id) * 0.02;
+  ctx.save(); ctx.translate(p.x, p.y + bob); ctx.rotate(bt.a || 0);
+  drawBoatBody(bt);
+  ctx.restore();
+  if (bt.hop > 0) bt.hop -= 1 / 60;
+  const top = Object.entries(bt.load.reduce((o, l) => (o[l.type] = (o[l.type] || 0) + l.n, o), {})).sort((a, b) => b[1] - a[1])[0];
+  if (top) emo.push([CARGO[top[0]].e, p.x, p.y - 0.42, 0.26]);
+  lights.push([p.x + Math.cos(bt.a || 0) * 0.5, p.y + Math.sin(bt.a || 0) * 0.5, 0.7, 0.8]);
+}
+// A wooden pier from the shore out over the water.
+function drawDock(c, s) {
+  const d = landDir(idx(s.x, s.y));
+  c.save(); c.translate(s.x + 0.5, s.y + 0.5); c.rotate(Math.atan2(DY[Math.max(0, d)], DX[Math.max(0, d)]));
+  c.fillStyle = 'rgba(0,30,60,0.2)'; c.fillRect(-0.3, -0.2, 0.84, 0.46);
+  c.fillStyle = '#b9824d'; c.fillRect(-0.34, -0.24, 0.86, 0.48);
+  c.strokeStyle = '#8a5a35'; c.lineWidth = 0.025; c.beginPath();
+  for (let k = 1; k < 8; k++) { const x = -0.34 + k * 0.107; c.moveTo(x, -0.24); c.lineTo(x, 0.24); }
+  c.stroke(); c.strokeRect(-0.34, -0.24, 0.86, 0.48);
+  c.fillStyle = '#5c3b22';
+  for (const [x, y] of [[-0.34, -0.24], [-0.34, 0.24], [0.1, -0.24], [0.1, 0.24]]) { c.beginPath(); c.arc(x, y, 0.06, 0, 7); c.fill(); }
+  c.fillStyle = '#f5d547'; c.beginPath(); c.arc(-0.2, 0, 0.07, 0, 7); c.fill();
+  c.restore();
+}
+
 // ---------- cars ----------
 // Cars shuttle along each road. They stop before a level crossing while a train is close to it.
 // A smooth drivable line along a list of road tiles.
@@ -1349,14 +1589,20 @@ function serve(tr, st) {
   const want = new Set();
   for (const id of tr.route) { const s2 = id !== st.id && stById(id); if (s2) accepts(s2).forEach(t => want.add(t)); }
   let room = capacity(tr) - loaded(tr);
-  const types = Object.keys(st.cargo).filter(t => st.cargo[t] > 0 && want.has(t));
-  while (room > 0 && types.some(t => st.cargo[t] > 0)) {
-    for (const t of types) {
-      if (room <= 0 || st.cargo[t] <= 0) continue;
-      st.cargo[t]--; room--; moved++;
-      let l = tr.load.find(q => q.type === t && q.from === st.id);
-      if (!l) tr.load.push(l = { type: t, from: st.id, n: 0 });
-      l.n++;
+  const prio = (tr.prio || []).filter(t => CARGO[t]);
+  let types = Object.keys(st.cargo).filter(t => st.cargo[t] > 0 && want.has(t) && (!tr.boat || BOATS[tr.boat].takes(t)));
+  if (tr.only && prio.length) types = types.filter(t => prio.includes(t));
+  // ⭐ priority goods load first, in the order they were picked; the rest share what room is left
+  const groups = [...prio.map(p => types.filter(t => t === p)), types.filter(t => !prio.includes(t))];
+  for (const grp of groups) {
+    while (room > 0 && grp.some(t => st.cargo[t] > 0)) {
+      for (const t of grp) {
+        if (room <= 0 || st.cargo[t] <= 0) continue;
+        st.cargo[t]--; room--; moved++;
+        let l = tr.load.find(q => q.type === t && q.from === st.id);
+        if (!l) tr.load.push(l = { type: t, from: st.id, n: 0 });
+        l.n++;
+      }
     }
   }
   return moved;
@@ -1682,7 +1928,7 @@ function renderCache() {
     drawDeco(c, id, tx(i), ty(i), i);
     if (id === 'windmill' || id === 'pond' || id === 'lamp') animDeco.push([id, tx(i), ty(i)]);
   }
-  for (const s of G.stations) drawStation(c, s);
+  for (const s of G.stations) if (s.dock) drawDock(c, s); else drawStation(c, s);
   for (const p of G.places) if (p.kind !== 'town') {
     const bx = p.x + 1.72, by = p.y + 0.28;
     c.fillStyle = 'rgba(0,0,0,0.18)'; c.beginPath(); c.arc(bx + 0.04, by + 0.06, 0.3, 0, 7); c.fill();
@@ -1720,6 +1966,7 @@ function drawMini() {
   c.drawImage(miniImg, 0, 0);
   c.fillStyle = '#ffffff';
   for (const tr of G.trains) { const p = posAt(tr.trail, tr.d); c.fillRect(p.x * miniPx - 1.5, p.y * miniPx - 1.5, 3, 3); }
+  for (const bt of G.boats) { const p = posAt(bt.trail, bt.s); c.fillRect(p.x * miniPx - 1.5, p.y * miniPx - 1.5, 3, 3); }
   const top = viewArea.top, bot = innerHeight - viewArea.bot;
   const x0 = (0 - view.ox) / view.s, y0 = (top - view.oy) / view.s, x1 = (innerWidth - view.ox) / view.s, y1 = (bot - view.oy) / view.s;
   c.strokeStyle = '#ffffff'; c.lineWidth = 2;
@@ -1784,9 +2031,9 @@ function drawBridge(c, i, cn, fill, edge, w) {
   c.strokeStyle = edge; c.lineWidth = 0.04; c.strokeRect(x + o, y + o, w, w);
 }
 
-function drawRoads(c) {
+function drawRoads(c, tiles) {
   const list = [];
-  for (let i = 0; i < W * H; i++) if (G.road[i]) for (const s of tileSegs(G.road[i])) list.push([tx(i), ty(i), s[0], s[1]]);
+  for (const i of tiles || allTiles()) if (G.road[i]) for (const s of tileSegs(G.road[i])) list.push([tx(i), ty(i), s[0], s[1]]);
   c.lineCap = 'round'; c.lineJoin = 'round';
   for (const [col, lw] of [['#6f7179', 0.6], ['#9da0a8', 0.5]]) {
     c.strokeStyle = col; c.lineWidth = lw; c.beginPath();
@@ -1858,9 +2105,28 @@ function railPath(c, x, y, e, f, off) {
     c.moveTo(ox + Math.cos(a0) * r, oy + Math.sin(a0) * r); c.arc(ox, oy, r, a0, a0 + da, da < 0);
   }
 }
-function drawTracks(c) {
+function* allTiles() { for (let i = 0; i < W * H; i++) yield i; }
+// Bridges are part of the cached map, under everything that moves. Where a boat is passing under one,
+// draw that bit of bridge again on top of the boat (trains and cars are drawn after, so they still cross above).
+function drawBridgesOverBoats() {
+  const tiles = new Set();
+  for (const bt of G.boats) {
+    const p = posAt(bt.trail, bt.s), x0 = Math.floor(p.x), y0 = Math.floor(p.y);
+    for (let y = y0 - 1; y <= y0 + 1; y++) for (let x = x0 - 1; x <= x0 + 1; x++) {
+      if (!inB(x, y)) continue;
+      const i = idx(x, y);
+      if (G.terr[i] === WATER && (G.conn[i] || G.road[i])) tiles.add(i);
+    }
+  }
+  if (!tiles.size) return;
+  for (const i of tiles) if (G.road[i]) drawBridge(ctx, i, G.road[i], '#9a8f80', '#6f665b', 0.66);
+  for (const i of tiles) if (G.conn[i]) drawBridge(ctx, i, G.conn[i], '#b9824d', '#8a5a35', 0.72);
+  drawRoads(ctx, tiles); drawTracks(ctx, tiles);
+  ctx.setLineDash([]);
+}
+function drawTracks(c, tiles) {
   const list = [];
-  for (let i = 0; i < W * H; i++) if (G.conn[i]) for (const s of tileSegs(G.conn[i])) list.push([tx(i), ty(i), s[0], s[1]]);
+  for (const i of tiles || allTiles()) if (G.conn[i]) for (const s of tileSegs(G.conn[i])) list.push([tx(i), ty(i), s[0], s[1]]);
   c.lineCap = 'butt';
   c.strokeStyle = '#9a6a3f'; c.lineWidth = 0.09; c.beginPath();
   for (const s of list) segSleepers(c, ...s);
@@ -2116,6 +2382,8 @@ function draw() {
     const types = Object.keys(s.cargo).filter(t => s.cargo[t] > 0).sort((a, b) => s.cargo[b] - s.cargo[a]).slice(0, 3);
     types.forEach((t, k) => emo.push([CARGO[t].e, s.x + 0.5 + (k - (types.length - 1) / 2) * 0.32, s.y - 0.12, 0.3]));
   }
+  for (const bt of G.boats) drawBoat(bt);
+  drawBridgesOverBoats();
   for (const car of cars) drawCar(car);
   for (const tr of G.trains) drawTrain(tr);
   for (const p of smoke) {
@@ -2133,9 +2401,9 @@ function draw() {
   for (const [e, x, y, size] of emo) { ctx.font = `${Math.round(size * view.s)}px ${EMOJI_FONT}`; ctx.fillText(e, sx(x), sy(y)); }
   const fs = clamp(view.s * 0.42, 11, 18);
   for (const p of G.places) if (p.kind === 'town') pill(tn(p.name), sx(p.cx), sy(p.cy + 0.05), fs, 'rgba(255,250,235,0.92)', '#4a3426');
-  if (hover && (tool === 'look' || tool === 'station' || tool === 'train')) {
+  if (hover && (tool === 'look' || tool === 'station' || tool === 'train' || tool === 'boat')) {
     const sId = G.stn[hover.i], pId = G.occ[hover.i];
-    const label = sId >= 0 ? `🚉 ${tn(stById(sId).name)}` : pId >= 0 && G.places[pId].kind !== 'town' ? tn(G.places[pId].name) : null;
+    const label = sId >= 0 ? `${stById(sId).dock ? '⚓' : '🚉'} ${tn(stById(sId).name)}` : pId >= 0 && G.places[pId].kind !== 'town' ? tn(G.places[pId].name) : null;
     if (label) pill(label, sx(hover.x + 0.5), sy(hover.y - 0.45), fs, '#4a3426', '#ffffff');
   }
   const dc = draftCost();
@@ -2179,7 +2447,17 @@ function drawOverlay() {
   const selTr = sel && sel.type === 'train' && trById(sel.id);
   if (selTr) drawRoute(selTr.route, selTr.color, false);
   if (tool === 'train') drawRoute(routeDraft, '#ff7a59', true);
-  if (tool === 'train') for (const s of G.stations) {
+  const selBoat = sel && sel.type === 'boat' && boatById(sel.id);
+  if (selBoat && selBoat.state === 'run') {
+    ctx.strokeStyle = selBoat.color; ctx.lineWidth = 0.12; ctx.globalAlpha = 0.6; ctx.setLineDash([0.25, 0.18]); ctx.beginPath();
+    selBoat.trail.forEach((p, k) => k ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+    ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+  }
+  if (tool === 'boat' && boatMode !== 'dock') for (const s of G.stations) if (s.dock) {
+    ctx.strokeStyle = s.id === boatDraft ? '#ffd23f' : '#ffffff'; ctx.lineWidth = s.id === boatDraft ? 0.12 : 0.07;
+    ctx.beginPath(); ctx.arc(s.x + 0.5, s.y + 0.5, 0.62 + Math.sin(performance.now() / 250) * 0.05, 0, 7); ctx.stroke();
+  }
+  if (tool === 'train') for (const s of G.stations) if (!s.dock) {
     ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.07; ctx.beginPath(); ctx.arc(s.x + 0.5, s.y + 0.5, 0.62 + Math.sin(performance.now() / 250) * 0.05, 0, 7); ctx.stroke();
   }
   const selBus = sel && sel.type === 'bus' && busById(sel.id), bc = selBus && busCar(selBus);
@@ -2200,6 +2478,10 @@ function drawOverlay() {
     const ok = decoOk(i);
     if (ok) { ctx.globalAlpha = 0.65; drawDeco(ctx, draftDeco, x, y); ctx.globalAlpha = 1; }
     ctx.strokeStyle = ok ? '#3fb36b' : '#e74c3c'; ctx.lineWidth = 0.08; ctx.strokeRect(x + 0.04, y + 0.04, 0.92, 0.92);
+  } else if (tool === 'boat' && boatMode === 'dock') {
+    const ok = dockOk(i);
+    if (ok) catchRect(x, y, 'rgba(255,230,100,0.22)', '#f2b632');
+    ctx.strokeStyle = ok ? '#3fb36b' : '#e74c3c'; ctx.lineWidth = 0.1; ctx.strokeRect(x + 0.05, y + 0.05, 0.9, 0.9);
   } else if (tool === 'station') {
     const ok = (G.conn[i] === 5 || G.conn[i] === 10) && G.stn[i] < 0 && G.terr[i] !== WATER && G.terr[i] !== HILL && !G.road[i];
     catchRect(x, y, 'rgba(255,230,100,0.22)', '#f2b632');
@@ -2464,15 +2746,17 @@ function toast(msg) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2300);
 }
 
-function setTool(name) {
-  tool = name; draft = null; busDraft = -1;
+function setTool(name, keepEdit) {
+  tool = name; draft = null; busDraft = -1; boatDraft = -1;
+  if (!keepEdit && editTrain >= 0) { editTrain = -1; routeDraft = []; }
   if (name !== 'train') routeDraft = [];
   document.querySelectorAll('#tools button').forEach(b => b.classList.toggle('on', b.dataset.tool === name));
-  if (name === 'train' && G.stations.length < 2) toast(t('You need two stations first! 🚉🚉'));
+  if (name === 'train' && G.stations.filter(s => !s.dock).length < 2) toast(t('You need two stations first! 🚉🚉'));
   updateUI(true);
 }
 
 function hintText() {
+  if (tool === 'train' && editTrain >= 0) return t('Click stations to add them to the route, and ✕ to take a stop off. Then press ✔ Save route.');
   if (tool === 'train') {
     if (!routeDraft.length) return t('Click the station where your train should start.');
     if (routeDraft.length < 2) return t('Now click another station for your train to visit!');
@@ -2483,13 +2767,17 @@ function hintText() {
   if (G.adv && G.trains.some(tr => tr.sigWait > 20)) return t('🚦 Some trains are stuck waiting. Try a passing loop, or click the train and press ✨ Rescue.');
   if (tool === 'remove') return t('Click things to tidy them away. You get some coins back!');
   if (tool === 'deco') return t('Pick something pretty, then click on the grass. Drag to plant lots! 🌷');
+  if (tool === 'boat') {
+    if (boatMode === 'dock') return t('Click on the water right next to the shore to build a ⚓ dock. It picks up from everything in the yellow square.');
+    return t(boatDraft < 0 ? 'Click the dock where your boat should start. ⛴️ Ferries carry passengers, 🚢 cargo ships carry goods.' : 'Now click another dock across the water!');
+  }
   if (tool === 'road') return t('Drag to draw a road, then let go to build it. Join two towns so 🚌 buses can drive between them. Roads can cross straight track.');
   if (tool === 'bus') return t(busDraft < 0 ? 'Click a town to start a bus route. Buses drive on the roads 🚌' : 'Now click another town joined to it by a road!');
   let track = 0;
   for (let i = 0; i < W * H; i++) if (G.conn[i]) { track++; break; }
   if (tool === 'track' && track) return t('Drag to draw rails, then let go to build them. Rails can cross roads 🚗 and go through hills ⛰️ in tunnels.');
   if (!track) return t("Hi! I'm Conductor Bea. Pick 🛤️ Track and drag on the map to lay rails from a town to somewhere else!");
-  if (G.stations.length < 2) return t('Lovely rails! Now pick 🚉 Station and put a station on the track near each end.');
+  if (G.stations.filter(s => !s.dock).length < 2) return t('Lovely rails! Now pick 🚉 Station and put a station on the track near each end.');
   if (!G.trains.length) return t('Choo choo! Pick 🚂 Train, click your stations, then press Go!');
   if (G.trains.some(tr => tr.state === 'lost')) return t("A train with ❓ can't find a way. Check that the track joins up!");
   return t(TIPS[Math.floor(G.time / 14) % TIPS.length]);
@@ -2515,12 +2803,14 @@ function panelHTML() {
       <div class="row">${status}</div>
       <div class="row"><b>${t('Route:')}</b> ${route}</div>
       <div class="row"><b>${t('Carrying:')}</b> ${cargoList(tot) || t('nothing yet')} <small>(${loaded(tr)}/${capacity(tr)})</small></div>
+      ${prioRow(tr)}
       <div class="row"><b>${t('Wagons:')}</b> ${'🚃'.repeat(tr.wagons)}</div>
       <div class="row"><b>${t('Earned:')}</b> 🪙 ${tr.earned}${trainRun(tr) ? ` <small>· ${t('costs {n}🪙 a minute to run', { n: trainRun(tr) })}</small>` : ''}</div>
       <div class="btns"><button data-act="addw">${t('➕ Wagon')} ${price(COST.wagon)}🪙</button><button data-act="remw">${t('➖ Wagon')}</button>
+      <button data-act="route">${t('🗺️ Route')}</button><button data-act="goods" class="${goodsOpen ? 'armed' : ''}">${t('📦 Goods')}</button>
       <button data-act="paint" class="${paintOpen ? 'armed' : ''}">${t('🎨 Paint')}</button><button data-act="rename">${t('✏️ Name')}</button>
       <button data-act="sell" class="${sure ? 'armed' : ''}">${t(sure ? 'Sure? 💰' : '💰 Sell')}</button>${G.adv && tr.sigWait > 6 ? `<button data-act="rescue">${t('✨ Rescue')}</button>` : ''}</div>
-      ${paintOpen ? paintHTML(tr) : ''}`;
+      ${paintOpen ? paintHTML(tr) : ''}${goodsOpen ? goodsHTML(tr) : ''}`;
   }
   if (sel.type === 'bus') {
     const rec = busById(sel.id); if (!rec) return '';
@@ -2532,16 +2822,33 @@ function panelHTML() {
       <div class="row"><b>${t('Earned:')}</b> 🪙 ${rec.earned}${busRun() ? ` <small>· ${t('costs {n}🪙 a minute to run', { n: busRun() })}</small>` : ''}</div>
       <div class="btns"><button data-act="sellbus" class="${sure ? 'armed' : ''}">${t(sure ? 'Sure? 💰' : '💰 Sell')}</button></div>`;
   }
+  if (sel.type === 'boat') {
+    const bt = boatById(sel.id); if (!bt) return '';
+    const B = BOATS[bt.boat], tot = {}, sure = armed === 'sellboat' + bt.id;
+    for (const l of bt.load) tot[l.type] = (tot[l.type] || 0) + l.n;
+    const route = bt.route.map(id => { const s = stById(id); return `<span class="${id === bt.target ? 'cur' : ''}">${s ? tn(s.name) : '?'}</span>`; }).join(' ⇄ ');
+    const status = t(bt.state === 'lost' ? "❓ Can't find a way over the water" : bt.state === 'run' ? '🌊 Sailing' : '⚓ At the dock');
+    return `<div class="ph"><span class="sw" style="background:${bt.color}"></span>${B.e} ${boatName(bt)} <small>${t(B.name)}</small>${close}</div>
+      <div class="row">${status}</div>
+      <div class="row"><b>${t('Route:')}</b> ${route}</div>
+      <div class="row"><b>${t('Carrying:')}</b> ${cargoList(tot) || t('nothing yet')} <small>(${loaded(bt)}/${capacity(bt)})</small></div>
+      <div class="row"><small>${t(bt.boat === 'ferry' ? 'Carries passengers 🧒' : 'Carries goods, not passengers')}</small></div>
+      <div class="row"><b>${t('Earned:')}</b> 🪙 ${bt.earned}${boatRun(bt) ? ` <small>· ${t('costs {n}🪙 a minute to run', { n: boatRun(bt) })}</small>` : ''}</div>
+      ${prioRow(bt)}
+      <div class="btns"><button data-act="goods" class="${goodsOpen ? 'armed' : ''}">${t('📦 Goods')}</button><button data-act="sellboat" class="${sure ? 'armed' : ''}">${t(sure ? 'Sure? 💰' : '💰 Sell')}</button></div>
+      ${goodsOpen ? goodsHTML(bt) : ''}`;
+  }
   if (sel.type === 'station') {
     const s = stById(sel.id); if (!s) return '';
     const near = s.places.map(id => tn(G.places[id].name)).join(', ') || t('nothing nearby');
-    const visits = G.trains.filter(tr => tr.route.includes(s.id)).map(tr => esc(tn(tr.name))).join(', ') || t('no trains yet');
-    return `<div class="ph">🚉 ${tn(s.name)}${close}</div>
+    const visits = s.dock ? G.boats.filter(bt => bt.route.includes(s.id)).map(boatName).join(', ') || t('no boats yet')
+      : G.trains.filter(tr => tr.route.includes(s.id)).map(tr => esc(tn(tr.name))).join(', ') || t('no trains yet');
+    return `<div class="ph">${s.dock ? '⚓' : '🚉'} ${tn(s.name)}${close}</div>
       <div class="row"><b>${t('Waiting:')}</b> ${cargoList(s.cargo) || t('nothing')}</div>
       <div class="row"><b>${t('Sends:')}</b> ${emojis([...supplies(s)]) || '—'}</div>
       <div class="row"><b>${t('Wants:')}</b> ${emojis([...accepts(s)]) || '—'}</div>
       <div class="row"><b>${t('Near:')}</b> ${near}</div>
-      <div class="row"><b>${t('Trains:')}</b> ${visits}</div>`;
+      <div class="row"><b>${t(s.dock ? 'Boats:' : 'Trains:')}</b> ${visits}</div>`;
   }
   if (sel.type === 'place') {
     const p = G.places[sel.id], k = KINDS[p.kind];
@@ -2572,7 +2879,13 @@ function paintHTML(tr) {
 }
 
 function routeBarHTML() {
-  const names = routeDraft.map(id => stById(id)).filter(Boolean).map(s => `<span>🚉 ${tn(s.name)}</span>`);
+  const ed = editTrain >= 0 && trById(editTrain);
+  const names = routeDraft.map(id => stById(id)).filter(Boolean).map((s, k) => `<span>🚉 ${tn(s.name)}<button class="rm" data-act="rm:${k}" title="${t('Take this stop off')}">✕</button></span>`);
+  if (ed) {
+    return `<div class="ttl">${t('🗺️ New route for {name}', { name: esc(tn(ed.name)) })}</div>
+    <div class="rt">${names.length ? names.join('<em>→</em>') : `<span class="dim">${t('Click stations on the map…')}</span>`}</div>
+    <div class="go"><button data-act="go" ${routeDraft.length < 2 ? 'disabled' : ''}>${t('✔ Save route')}</button><button data-act="undo" title="${t('Undo last stop')}">↩</button><button data-act="cancel" title="${t('Cancel')}">✕</button></div>`;
+  }
   const eng = ENGINES.map((e, n) => {
     const locked = G.stars < e.stars;
     const info = locked ? t('needs {n} ⭐', { n: e.stars }) : `${price(e.cost)}🪙 · ${'⚡'.repeat(n + 1)} · ${t('{n} wagons', { n: e.wagons })}`;
@@ -2638,6 +2951,8 @@ function updateUI(force) {
   $('routebar').hidden = tool !== 'train';
   if (tool === 'train') setHTML('routebar', routeBarHTML());
   $('decobar').hidden = tool !== 'deco';
+  $('boatbar').hidden = tool !== 'boat';
+  if (tool === 'boat') setHTML('boatbar', boatBarHTML());
   if (tool === 'deco' && setHTML('decobar', `${decoBarHTML()}<!--${seasonIx()}-->`)) drawDecoPreviews();
   const S = season();
   $('season').textContent = `${S.e} ${t(S.name)} · ${CARGO[S.bonus].e}×2 ${dayIcon()}`;
@@ -2677,7 +2992,10 @@ function panelAct(act) {
     if (armed === 'sell' + tr.id) { armed = null; sellTrain(tr); sfx('coin'); }
     else arm('sell' + tr.id);
   } else if (tr && act === 'rescue') rescueTrain(tr);
-  else if (tr && act === 'paint') paintOpen = !paintOpen;
+  else if (tr && act === 'paint') { paintOpen = !paintOpen; goodsOpen = false; }
+  else if (tr && act === 'route') { setTool('train', true); editTrain = tr.id; routeDraft = tr.route.slice(); sfx('pop'); updateUI(true); return; }
+  else if (act === 'goods') { goodsOpen = !goodsOpen; paintOpen = false; }
+  else if (/^(prio:|only$)/.test(act)) { const v = tr || (sel && sel.type === 'boat' && boatById(sel.id)); if (v) goodsAct(v, act); }
   else if (tr && act === 'rename') { renaming = true; updateUI(true); const i = $('rename'); i.focus(); i.select(); return; }
   else if (tr && act === 'nameok') { renameTrain(tr, $('rename').value); return; }
   else if (tr && /^(col|pat|face):/.test(act)) {
@@ -2687,6 +3005,10 @@ function panelAct(act) {
       if (k === 'col') tr.color = v; else if (k === 'pat') tr.pattern = v; else tr.face = v;
       const p = posAt(tr.trail, tr.d); puff(p.x, p.y, 8, solid(tr.color)); sfx('pop');
     }
+  } else if (sel && sel.type === 'boat' && act === 'sellboat') {
+    const bt = boatById(sel.id);
+    if (bt && armed === 'sellboat' + bt.id) { armed = null; sellBoat(bt); sfx('coin'); }
+    else if (bt) arm('sellboat' + bt.id);
   } else if (sel && sel.type === 'bus' && act === 'sellbus') {
     const rec = busById(sel.id);
     if (rec && armed === 'sellbus' + rec.id) { armed = null; sellBus(rec); sfx('coin'); }
@@ -2698,8 +3020,11 @@ function panelAct(act) {
 function routeAct(act, engId) {
   if (engId) { draftEngine = engId; sfx('pop'); }
   else if (act === 'go') {
-    if (routeDraft.length >= 2 && buyTrain(routeDraft, draftEngine)) { routeDraft = []; setTool('look'); return; }
-  } else if (act === 'undo') routeDraft.pop();
+    const ed = editTrain >= 0 && trById(editTrain);
+    if (ed) { if (setRoute(ed, routeDraft)) { sel = { type: 'train', id: ed.id }; setTool('look'); return; } }
+    else if (routeDraft.length >= 2 && buyTrain(routeDraft, draftEngine)) { routeDraft = []; setTool('look'); return; }
+  } else if (act && act.startsWith('rm:')) { routeDraft.splice(+act.slice(3), 1); sfx('pop'); }
+  else if (act === 'undo') routeDraft.pop();
   else if (act === 'cancel') { setTool('look'); return; }
   updateUI(true);
 }
@@ -2716,8 +3041,14 @@ function pick(w, tile) {
     if (d < bd) { bd = d; best = tr; }
   }
   for (const c of cars) { const p = carPose(c), d = Math.hypot(p.x - w.x, p.y - w.y); if (d < cd) { cd = d; car = c; } }
+  let boat = null, btd = 0.55;
+  for (const bt of G.boats) { const p = posAt(bt.trail, bt.s), d = Math.hypot(p.x - w.x, p.y - w.y); if (d < btd) { btd = d; boat = bt; } }
   const prev = sel && sel.type + sel.id;
-  if (best) {
+  if (boat && !best) {
+    sel = { type: 'boat', id: boat.id };
+    const p = posAt(boat.trail, boat.s);
+    sfx('honk'); floater(p.x, p.y - 0.4, t('Hoot hoot!'), '#ffffff');
+  } else if (best) {
     sel = { type: 'train', id: best.id };
     const p = posAt(best.trail, best.d);
     sfx('honk'); puff(p.x, p.y, 10, '#ffffff'); floater(p.x, p.y - 0.4, t('Toot toot!'), '#ffffff');
@@ -2733,7 +3064,7 @@ function pick(w, tile) {
     else sel = null;
     if (sel) sfx('pop');
   }
-  if (!sel || sel.type + sel.id !== prev) paintOpen = renaming = false;
+  if (!sel || sel.type + sel.id !== prev) paintOpen = renaming = goodsOpen = false;
   updateUI(true);
 }
 
@@ -2748,6 +3079,7 @@ function busToolClick(tile) {
 function trainToolClick(tile) {
   const id = G.stn[tile.i];
   if (id < 0) { toast(t('Click on a station! 🚉')); return; }
+  if (stById(id).dock) { toast(t("Trains can't go to a dock! Use ⛴️ Boats.")); return; }
   if (routeDraft.includes(id)) { toast(t('That station is already on the route.')); return; }
   routeDraft.push(id); sfx('pop'); updateUI(true);
 }
@@ -2815,6 +3147,7 @@ cv.addEventListener('pointerdown', e => {
   else if (tool === 'station') buildStation(tile.i);
   else if (tool === 'train') trainToolClick(tile);
   else if (tool === 'bus') busToolClick(tile);
+  else if (tool === 'boat') boatToolClick(tile);
   else if (tool === 'signal' && G.adv) toggleSignal(tile.i);
   updateUI();
 });
@@ -2886,6 +3219,7 @@ $('tools').addEventListener('click', e => {
   audio();
   if (b.id === 'undo') undo(); else { setTool(b.dataset.tool); sfx('build'); }
 });
+$('boatbar').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { boatMode = b.dataset.boat; boatDraft = -1; sfx('pop'); updateUI(true); } });
 $('decobar').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { draftDeco = b.dataset.deco; sfx('pop'); updateUI(true); } });
 $('music').addEventListener('click', () => {
   musicOn = !musicOn; audio();
@@ -2976,8 +3310,9 @@ $('startbtn').addEventListener('click', () => { audio(); $('welcome').hidden = t
 
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-  const tools = ['look', 'track', 'station', 'train', 'road', 'bus', 'deco', 'remove', 'signal'];
-  if (e.key >= '1' && e.key <= (G.adv ? '9' : '8')) setTool(tools[+e.key - 1]);
+  const tools = ['look', 'track', 'station', 'train', 'road', 'bus', 'boat', 'deco', 'remove', 'signal'];
+  const kn = e.key === '0' ? 10 : /^[1-9]$/.test(e.key) ? +e.key : 0;
+  if (kn && kn <= (G.adv ? 10 : 9)) setTool(tools[kn - 1]);
   else if (e.key === 'z' || e.key === 'Z') { undo(); e.preventDefault(); }
   else if (e.key === 'Escape') { if (draft) draft = null; else { sel = null; setTool('look'); } }
   else if (e.key === 'Enter' && tool === 'train') routeAct('go');
@@ -3011,8 +3346,9 @@ function snapshot() {
   return {
       v: 1, seed: G.seed, W, H, scn: G.scn, diff: G.diff, adv: G.adv, sig: G.adv ? Array.from(G.sig) : undefined, runT: G.runT, runAcc: G.runAcc, coins: G.coins, stars: G.stars, time: G.time, nextId: G.nextId, nameIx: G.nameIx, piggyAt: G.piggyAt,
       terr: Array.from(G.terr), conn: Array.from(G.conn), road: Array.from(G.road), deco: Array.from(G.deco), roads: G.roads, places: G.places,
-      stations: G.stations.map(({ id, x, y, name, cargo }) => ({ id, x, y, name, cargo })),
-      trains: G.trains.map(t => ({ id: t.id, name: t.name, color: t.color, pattern: t.pattern, face: t.face, eng: t.eng, wagons: t.wagons, route: t.route, target: t.target, load: t.load, earned: t.earned })),
+      stations: G.stations.map(({ id, x, y, name, cargo, dock }) => ({ id, x, y, name, cargo, dock })),
+      boats: G.boats.map(({ id, boat, n, route, target, load, earned, color, prio, only }) => ({ id, boat, n, route, target, load, earned, color, prio, only })), boatN: G.boatN,
+      trains: G.trains.map(t => ({ id: t.id, name: t.name, color: t.color, pattern: t.pattern, face: t.face, eng: t.eng, wagons: t.wagons, route: t.route, target: t.target, load: t.load, earned: t.earned, prio: t.prio, only: t.only })),
       buses: G.buses, busN: G.busN, stats: G.stats, quests: G.quests,
   };
 }
@@ -3032,7 +3368,7 @@ function load(d) {
       road: d.road ? Uint8Array.from(d.road) : new Uint8Array(W * H), deco: d.deco ? Uint8Array.from(d.deco) : new Uint8Array(W * H),
       occ: new Int16Array(W * H).fill(-1), stn: new Int32Array(W * H).fill(-1),
       places: d.places, stations: d.stations.map(s => ({ ...s, places: [] })), trains: [], roads: d.roads || [],
-      buses: d.buses || [], busN: d.busN || 0, stats: d.stats, quests: (d.quests || []).filter(q => q.kind !== 'deliver' || CARGO[q.type]),
+      buses: d.buses || [], busN: d.busN || 0, boats: [], boatN: d.boatN || 0, stats: d.stats, quests: (d.quests || []).filter(q => q.kind !== 'deliver' || CARGO[q.type]),
     };
     for (const p of G.places) for (const i of p.tiles) G.occ[i] = p.id;
     while (G.quests.length < 3) G.quests.push(makeQuest());
@@ -3045,6 +3381,11 @@ function load(d) {
       tr.target = st.id; placeAt(tr, idx(st.x, st.y));
       tr.ghost = GHOST_T; // trains parked together at a station get time to spread out
       G.trains.push(tr);
+    }
+    for (const b of d.boats || []) {
+      const st = stById(b.target) || stById(b.route[0]);
+      if (!BOATS[b.boat] || !st || !b.route.every(id => stById(id))) continue;
+      const bt = { ...b }; dockBoat(bt, st); G.boats.push(bt);
     }
     initCars(); undoStack.length = 0; curSeason = -1; draft = null; view.init = false;
     dirty = true; sigDirty = true; wrecks = [];
@@ -3163,6 +3504,7 @@ function sim(dt) {
   G.time += dt;
   if (G.adv) updTaken();
   for (const tr of G.trains.slice()) { updTrain(tr, dt); if (tr.ghost > 0) tr.ghost -= dt; }
+  for (const bt of G.boats) updBoat(bt, dt);
   if (G.adv) checkCrashes();
   updCars(dt);
   G.prodT += dt;
@@ -3174,7 +3516,7 @@ function sim(dt) {
 }
 // Running costs come out a little at a time; coins can dip below zero, and then nothing new can be bought.
 function payRunning() {
-  const perMin = G.trains.reduce((a, tr) => a + trainRun(tr), 0) + G.buses.length * busRun();
+  const perMin = G.trains.reduce((a, tr) => a + trainRun(tr), 0) + G.buses.length * busRun() + G.boats.reduce((a, bt) => a + boatRun(bt), 0);
   G.runAcc = (G.runAcc || 0) + perMin * RUN_EVERY / 60;
   const n = Math.floor(G.runAcc); if (n <= 0) return;
   G.runAcc -= n; G.coins -= n; G.stats.running = (G.stats.running || 0) + n;
@@ -3194,7 +3536,7 @@ function tick(rdt) {
   if (uiT <= 0) {
     uiT = 0.25;
     checkQuests(); checkGoal();
-    if (G.coins < price(ENGINES[0].cost) && !G.trains.length && !G.buses.length && G.time - G.piggyAt > 45) {
+    if (G.coins < price(ENGINES[0].cost) && !G.trains.length && !G.buses.length && !G.boats.length && G.time - G.piggyAt > 45) {
       const n = price(80); G.piggyAt = G.time; G.coins = Math.max(0, G.coins) + n; sfx('coin');
       toast(t('🐷 Oink! Your piggy bank found {n} coins!', { n }));
     }
@@ -3224,7 +3566,7 @@ if (/[?&]debug\b/.test(location.search)) {
     setTool, produce, idx, KINDS, CARGO, save, load, undo, beginAct, endAct, placeDeco, draftStart, draftTo, draftCommit,
     darkness, seasonIx, gateDown, buyBus, sellBus, roadRoute, pick, panelAct, panelHTML, deliver, makeQuest,
     get sel() { return sel; }, set sel(v) { sel = v; },
-    get W() { return W; }, get H() { return H; }, view, zoomAt, centerOn, clampView, minScale, startScenario, openMaps, checkGoal, SCENARIOS, SIZES, sized, DIFFS, price, trainRun, busRun, payRunning, toggleSignal, updTaken, sigLimit, posAt, checkCrashes, rescueTrain, get taken() { return taken; }, get mapAdv() { return mapAdv; }, set mapAdv(v) { mapAdv = v; }, get mapDiff() { return mapDiff; }, set mapDiff(v) { mapDiff = v; }, get mapSize() { return mapSize; }, copySaveText, loadSaveText, roadsChanged, connectRoad, roadLinkCost, get roadsN() { return G.roads.length; }, snapshot, readSlot, slotAct, loadSave, openSaves, exportSave, SLOTS, set mapSize(v) { mapSize = v; }, resize, get cars() { return cars; }, get undoStack() { return undoStack; }, get draft() { return draft; },
+    get W() { return W; }, get H() { return H; }, view, zoomAt, centerOn, clampView, minScale, startScenario, openMaps, checkGoal, SCENARIOS, SIZES, sized, DIFFS, price, trainRun, busRun, payRunning, toggleSignal, updTaken, sigLimit, posAt, checkCrashes, rescueTrain, get taken() { return taken; }, get mapAdv() { return mapAdv; }, set mapAdv(v) { mapAdv = v; }, get mapDiff() { return mapDiff; }, set mapDiff(v) { mapDiff = v; }, get mapSize() { return mapSize; }, setRoute, routeGoods, goodsHTML, serve, routeAct, routeBarHTML, get editTrain() { return editTrain; }, get routeDraft() { return routeDraft; }, buildDock, buyBoat, sellBoat, waterPath, dockOk, boatToolClick, get boatMode() { return boatMode; }, set boatMode(v) { boatMode = v; }, BOATS, copySaveText, loadSaveText, roadsChanged, connectRoad, roadLinkCost, get roadsN() { return G.roads.length; }, snapshot, readSlot, slotAct, loadSave, openSaves, exportSave, SLOTS, set mapSize(v) { mapSize = v; }, resize, get cars() { return cars; }, get undoStack() { return undoStack; }, get draft() { return draft; },
   };
 }
 })();

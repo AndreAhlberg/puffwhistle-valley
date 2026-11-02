@@ -22,11 +22,22 @@ Or open `index.html` in a browser. There's no build step and no server needed.
   used it back to the garage.
 - **🚌 Bus** (40🪙): click a town, then another town joined to it by a road. The bus shuttles passengers
   between them. It pays less than a train but needs no track.
+- **⛴️ Boats**: the bar at the top picks what to do.
+  - **⚓ Dock** (20🪙): click the water right next to the shore. A dock works like a station on the water and serves
+    everything in its 5×5 yellow square.
+  - **⛴️ Ferry** (45🪙, 16 passengers) or **🚢 Cargo ship** (70🪙, 24 goods, slower): click one dock, then another dock
+    that the water joins up with. Boats steer their own way over rivers and the sea, need no track, and load and
+    unload like trains. Ferries only carry passengers; cargo ships carry everything else. Removing a dock sends
+    its boats back to the boatyard. Boats never crash, even in advanced mode.
 - **🌷 Decorate**: flowers, trees, fences (they join up), benches, lamp posts (they glow at night), duck
   ponds, windmills, and snowmen (winter only; they melt in spring). Drag to place lots.
 - **👆 Look**: click trains, buses, stations, towns and industries. Add or remove wagons, or sell a train
   or bus. Clicking makes things honk: trains toot, cars and buses beep, ducks quack. Press **✏️ Name** (or
   click the train's name) to rename it; Enter saves, Esc cancels.
+- **🗺️ Route** (in a train's panel): change where a running train goes without selling it. The route bar opens with its
+  stops; click stations to add them, ✕ to take one off, then **✔ Save route**. The train finishes the trip it's on first.
+- **📦 Goods** (in a train's or boat's panel): tap goods to make them ⭐ priority. ⭐1 loads first, then ⭐2, and so on;
+  other goods fill whatever room is left. Tick **Only carry ⭐ goods** to leave everything else at the station.
 - **🎨 Paint** (in a train's panel): colours, patterns and faces. Fancier ones unlock with ⭐ stars:
   black at 1, gold at 2, pink at 3 and rainbow at 5; stripes at 1, spots at 2 and stars at 4; the 😮 face at
   1 and the 😎 face at 3.
@@ -34,7 +45,7 @@ Or open `index.html` in a browser. There's no build step and no server needed.
 - **↩️ Undo**: each drag or click is one step, up to 30 back. Buying a train clears the undo history.
 - **Moving around**: scroll or pinch to zoom. Drag with 👆 Look, or with the right or middle mouse button
   in any tool, to pan. The ➕ ➖ ⤢ buttons also zoom, and clicking the minimap in the corner jumps there.
-- Keys: `1`–`8` pick tools, `Z` undoes, `Space` pauses, `Enter` sends off a new train, `Esc` cancels,
+- Keys: `1`–`9` pick tools (`0` is the 🚦 signal tool in advanced mode), `Z` undoes, `Space` pauses, `Enter` sends off a new train, `Esc` cancels,
   arrow keys pan, `+`/`-` zoom and `0` shows the whole map.
 
 ## Saving
@@ -66,7 +77,7 @@ Long routes with full trains pay best. The piggy bank still helps if you have no
 ## 🚦 Advanced mode: signals and crashes
 Switch on **🚦 Signals & crashes** in the valley picker (it works with any difficulty and size). Trains are no
 longer friendly ghosts: two trains that meet on the same track crash 💥 and both are lost. A **🚦 Signal** tool
-(12🪙, key `9`) appears in the toolbar:
+(12🪙, key `0`) appears in the toolbar:
 
 - Put signals on straight track (not on stations, road crossings, tunnels or junctions). Click one again, or use 🧹,
   to take it away. Each signal works in both directions.
@@ -124,7 +135,7 @@ for ⭐⭐⭐. The picker remembers your best stars for each valley, and you can
 
 Quests award ⭐ stars, which unlock faster engines: Dasher at 3 ⭐ and Comet at 7 ⭐. The game
 autosaves to localStorage. If you run out of money with no trains, the piggy bank helps out.
-Trains are friendly ghosts and pass through each other, so nothing can crash.
+Trains are friendly ghosts and pass through each other, so nothing can crash (switch on advanced mode for crashes).
 
 ## Languages
 English and Swedish (Puffvisseldalen). The 🌐 button in the top bar switches between them and the choice
