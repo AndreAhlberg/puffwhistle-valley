@@ -111,6 +111,8 @@ const ENG = Object.fromEntries(ENGINES.map(e => [e.id, e]));
 const TRAIN_NAMES = ['Puffy', 'Zippy', 'Biscuit', 'Pip', 'Bramble', 'Sunny', 'Clover', 'Pepper', 'Jellybean', 'Tumble', 'Rosie', 'Button', 'Noodle', 'Waffles', 'Pickle', 'Marble', 'Toffee', 'Dot'];
 const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#e84393', '#16a085', '#e67e22', '#2d98da', '#20bf6b'];
 const ROOFS = ['#e8584f', '#f39c3d', '#5b8def', '#9b6bd6', '#e86fa8', '#3fb38f', '#d9534f'];
+const WALLS = ['#fff4dc', '#ffe1e1', '#dff0ff', '#e3f7df', '#fff1b8', '#f3e3ff', '#ffe6cc'];
+const AWNINGS = ['#e8584f', '#3fb36b', '#5b8def', '#f39c3d', '#e86fa8'];
 const TOWN_NAMES = ['Maple Town', 'Puddleby', 'Honeyhill', 'Pebble Cove', 'Sunnyvale', 'Bramble End', 'Little Wick', 'Cloverdale', 'Button Bay', 'Muffin Hill', 'Duckford', 'Teacup Green'];
 const TIPS = [
   'Boats sail on rivers and the sea. Build a ⚓ dock on each shore, then add a ⛴️ ferry or a 🚢 cargo ship!',
@@ -2119,10 +2121,18 @@ function drawBridgesOverBoats() {
     }
   }
   if (!tiles.size) return;
+  // clip to exactly those squares, and draw the road/rails through their neighbours too,
+  // so the strokes join up with the map underneath instead of ending in rounded caps
+  const near = new Set(tiles);
+  for (const i of tiles) for (let d = 0; d < 4; d++) { const n = nb(i, d); if (n >= 0) near.add(n); }
+  ctx.save(); ctx.beginPath();
+  for (const i of tiles) ctx.rect(tx(i), ty(i), 1, 1);
+  ctx.clip();
   for (const i of tiles) if (G.road[i]) drawBridge(ctx, i, G.road[i], '#9a8f80', '#6f665b', 0.66);
   for (const i of tiles) if (G.conn[i]) drawBridge(ctx, i, G.conn[i], '#b9824d', '#8a5a35', 0.72);
-  drawRoads(ctx, tiles); drawTracks(ctx, tiles);
+  drawRoads(ctx, near); drawTracks(ctx, near);
   ctx.setLineDash([]);
+  ctx.restore();
 }
 function drawTracks(c, tiles) {
   const list = [];
@@ -2161,7 +2171,7 @@ function drawStation(c, s) {
 }
 
 function drawPlace(c, p) {
-  if (p.kind === 'town') { for (const i of p.tiles) drawHouse(c, tx(i), ty(i)); return; }
+  if (p.kind === 'town') { p.tiles.forEach((i, k) => drawTownTile(c, p, k, i)); return; }
   const x = p.x, y = p.y;
   const base = { orchard: '#aee07c', farm: '#aee07c', lumber: '#dcc08a', bakery: '#f6e7d2', toyshop: '#dceefa', harbour: '#f3dfa2', fishfac: '#e3f2fb', quarry: '#cfc8bb', bricks: '#f2ddd0' }[p.kind];
   rr(c, x + 0.1, y + 0.12, 1.84, 1.84, 0.25); c.fillStyle = 'rgba(0,0,0,0.12)'; c.fill();
@@ -2245,16 +2255,116 @@ function drawPlace(c, p) {
   }
 }
 
-function drawHouse(c, x, y) {
-  const roof = ROOFS[Math.floor(hash(x, y, 5) * ROOFS.length)];
+// ---------- town buildings ----------
+// Which building stands on a town square depends on how central it is (p.tiles grow outwards from the middle)
+// and how big the town has grown, so towns change as they grow: a town hall in the middle, shops and terraces
+// around it, flats once the town is big, and cottages with gardens at the edge.
+function townKind(p, k, x, y) {
+  const n = p.tiles.length, h = hash(x, y, 11), inner = k < n * 0.4;
+  if (k === 0) return 'hall';
+  if (n >= 14 && inner && h < 0.55) return 'flats';
+  if (n >= 8 && k <= 3 && h < 0.7) return 'shop';
+  if ((inner && h < 0.45) || (n >= 6 && h > 0.8)) return 'terrace';
+  if (h < 0.12) return 'shop';
+  return 'cottage';
+}
+function drawTownTile(c, p, k, i) {
+  const x = tx(i), y = ty(i), kind = townKind(p, k, x, y), winter = seasonIx() === 3;
+  if (kind === 'hall') drawHall(c, x, y, p.tiles.length, winter);
+  else if (kind === 'flats') drawFlats(c, x, y, winter);
+  else if (kind === 'shop') drawShop(c, x, y, winter);
+  else if (kind === 'terrace') drawTerrace(c, x, y, winter);
+  else drawHouse(c, x, y, winter);
+}
+const choose = (list, x, y, k) => list[Math.floor(hash(x, y, k) * list.length)];
+function snowCap(c, x0, y0, x1, y1) { c.fillStyle = 'rgba(255,255,255,0.9)'; c.fillRect(x0, y0, x1 - x0, y1 - y0); }
+function windows(c, ox, oy, cols, rows, w, h, gx, gy, col = '#8fd3ff') {
+  c.fillStyle = col;
+  for (let r = 0; r < rows; r++) for (let q = 0; q < cols; q++) c.fillRect(ox + q * gx, oy + r * gy, w, h);
+}
+// A cottage: different walls, roofs and doors, sometimes a chimney, a flower box or a little garden.
+function drawHouse(c, x, y, winter) {
+  const roof = choose(ROOFS, x, y, 5), wall = choose(WALLS, x, y, 12), v = hash(x, y, 13);
   const ox = x + 0.12 + hash(x, y, 6) * 0.06, oy = y + 0.1 + hash(x, y, 8) * 0.06;
   c.fillStyle = 'rgba(0,0,0,0.15)'; c.fillRect(ox + 0.06, oy + 0.12, 0.74, 0.7);
-  c.fillStyle = '#fff4dc'; c.fillRect(ox, oy + 0.3, 0.72, 0.48);
-  c.fillStyle = '#7a4e2d'; c.fillRect(ox + 0.29, oy + 0.52, 0.14, 0.26);
-  c.fillStyle = '#8fd3ff'; c.fillRect(ox + 0.08, oy + 0.44, 0.14, 0.13); c.fillRect(ox + 0.5, oy + 0.44, 0.14, 0.13);
+  if (v > 0.6) { // garden with a hedge and flowers
+    c.fillStyle = winter ? '#e9f2f7' : '#7cc46a'; c.fillRect(ox - 0.06, oy + 0.74, 0.84, 0.16);
+    if (!winter) for (let k = 0; k < 4; k++) { c.fillStyle = ['#ff6b6b', '#ffd23f', '#e86fa8', '#ffffff'][k]; c.beginPath(); c.arc(ox + 0.04 + k * 0.2, oy + 0.82, 0.035, 0, 7); c.fill(); }
+  }
+  c.fillStyle = wall; c.fillRect(ox, oy + 0.3, 0.72, 0.48);
+  c.strokeStyle = 'rgba(0,0,0,0.12)'; c.lineWidth = 0.02; c.strokeRect(ox, oy + 0.3, 0.72, 0.48);
+  c.fillStyle = choose(['#7a4e2d', '#3d7fc9', '#2e8b57', '#c0392b'], x, y, 14); c.fillRect(ox + 0.29, oy + 0.52, 0.14, 0.26);
+  c.fillStyle = '#ffd23f'; c.fillRect(ox + 0.39, oy + 0.64, 0.025, 0.025);
+  windows(c, ox + 0.08, oy + 0.44, 2, 1, 0.14, 0.13, 0.42, 0);
+  if (v < 0.3) { c.fillStyle = '#e86fa8'; c.fillRect(ox + 0.07, oy + 0.57, 0.16, 0.035); c.fillRect(ox + 0.49, oy + 0.57, 0.16, 0.035); }
+  if (v > 0.35 && v < 0.8) { c.fillStyle = '#8f6d5a'; c.fillRect(ox + 0.5, oy - 0.04, 0.1, 0.2); }
   c.fillStyle = roof; c.beginPath();
   c.moveTo(ox - 0.07, oy + 0.36); c.lineTo(ox + 0.1, oy + 0.02); c.lineTo(ox + 0.62, oy + 0.02); c.lineTo(ox + 0.79, oy + 0.36); c.closePath(); c.fill();
   c.strokeStyle = 'rgba(0,0,0,0.18)'; c.lineWidth = 0.04; c.beginPath(); c.moveTo(ox + 0.1, oy + 0.12); c.lineTo(ox + 0.62, oy + 0.12); c.stroke();
+  if (winter) snowCap(c, ox + 0.1, oy + 0.02, ox + 0.62, oy + 0.11);
+}
+// Two narrow houses side by side, each its own colour, two floors high.
+function drawTerrace(c, x, y, winter) {
+  const ox = x + 0.08, oy = y + 0.06;
+  c.fillStyle = 'rgba(0,0,0,0.15)'; c.fillRect(ox + 0.06, oy + 0.14, 0.84, 0.8);
+  for (let h = 0; h < 2; h++) {
+    const hx = ox + h * 0.42, wall = choose(WALLS, x + h, y, 15), roof = choose(ROOFS, x + h, y, 16);
+    c.fillStyle = wall; c.fillRect(hx, oy + 0.24, 0.42, 0.64);
+    c.strokeStyle = 'rgba(0,0,0,0.14)'; c.lineWidth = 0.02; c.strokeRect(hx, oy + 0.24, 0.42, 0.64);
+    windows(c, hx + 0.07, oy + 0.33, 2, 2, 0.1, 0.11, 0.18, 0.18);
+    c.fillStyle = choose(['#7a4e2d', '#3d7fc9', '#2e8b57'], x + h, y, 17); c.fillRect(hx + 0.15, oy + 0.7, 0.12, 0.18);
+    c.fillStyle = roof; c.beginPath(); c.moveTo(hx - 0.02, oy + 0.26); c.lineTo(hx + 0.21, oy - 0.02); c.lineTo(hx + 0.44, oy + 0.26); c.closePath(); c.fill();
+    if (winter) { c.fillStyle = 'rgba(255,255,255,0.9)'; c.beginPath(); c.moveTo(hx + 0.1, oy + 0.11); c.lineTo(hx + 0.21, oy - 0.02); c.lineTo(hx + 0.32, oy + 0.11); c.closePath(); c.fill(); }
+  }
+}
+// A shop with a striped awning and a big window.
+function drawShop(c, x, y, winter) {
+  const ox = x + 0.1, oy = y + 0.12, aw = choose(AWNINGS, x, y, 18), wall = choose(WALLS, x, y, 19);
+  c.fillStyle = 'rgba(0,0,0,0.15)'; c.fillRect(ox + 0.06, oy + 0.12, 0.8, 0.72);
+  c.fillStyle = wall; c.fillRect(ox, oy + 0.08, 0.8, 0.72);
+  c.fillStyle = '#6b4a3a'; c.fillRect(ox - 0.02, oy, 0.84, 0.1); // flat roof edge
+  if (winter) snowCap(c, ox - 0.02, oy - 0.03, ox + 0.82, oy + 0.04);
+  c.fillStyle = '#ffffff'; c.fillRect(ox + 0.15, oy + 0.16, 0.5, 0.12); // sign
+  c.fillStyle = aw; c.fillRect(ox + 0.22, oy + 0.2, 0.36, 0.04);
+  for (let k = 0; k < 6; k++) { c.fillStyle = k % 2 ? '#ffffff' : aw; c.fillRect(ox + k * 0.1333, oy + 0.34, 0.1333, 0.12); }
+  c.fillStyle = aw; for (let k = 0; k < 6; k++) { c.beginPath(); c.arc(ox + 0.0667 + k * 0.1333, oy + 0.46, 0.066, 0, Math.PI); c.fill(); }
+  c.fillStyle = '#bfe6ff'; c.fillRect(ox + 0.07, oy + 0.54, 0.42, 0.22);
+  c.fillStyle = 'rgba(255,255,255,0.6)'; c.fillRect(ox + 0.1, oy + 0.56, 0.08, 0.18);
+  c.fillStyle = '#7a4e2d'; c.fillRect(ox + 0.56, oy + 0.52, 0.16, 0.28);
+}
+// A block of flats: flat roof, three floors of windows, little balconies.
+function drawFlats(c, x, y, winter) {
+  const ox = x + 0.08, oy = y + 0.04, wall = choose(['#f1e6d6', '#dfe7ef', '#f5d9c8', '#e6eedc'], x, y, 20), bal = choose(AWNINGS, x, y, 21);
+  c.fillStyle = 'rgba(0,0,0,0.18)'; c.fillRect(ox + 0.07, oy + 0.12, 0.84, 0.86);
+  c.fillStyle = wall; c.fillRect(ox, oy + 0.08, 0.84, 0.86);
+  c.strokeStyle = 'rgba(0,0,0,0.18)'; c.lineWidth = 0.025; c.strokeRect(ox, oy + 0.08, 0.84, 0.86);
+  c.fillStyle = '#9aa0a8'; c.fillRect(ox - 0.02, oy + 0.04, 0.88, 0.08);
+  if (winter) snowCap(c, ox - 0.02, oy + 0.01, ox + 0.86, oy + 0.07);
+  c.fillStyle = '#7d848c'; c.fillRect(ox + 0.6, oy - 0.04, 0.14, 0.1); // roof box
+  windows(c, ox + 0.08, oy + 0.18, 3, 3, 0.16, 0.13, 0.26, 0.22);
+  c.fillStyle = bal; for (let r = 0; r < 3; r++) c.fillRect(ox + 0.06, oy + 0.31 + r * 0.22, 0.2, 0.03), c.fillRect(ox + 0.58, oy + 0.31 + r * 0.22, 0.2, 0.03);
+  c.fillStyle = '#7a4e2d'; c.fillRect(ox + 0.35, oy + 0.78, 0.14, 0.16);
+}
+// The town hall in the middle of every town, with a clock tower (and a flag once the town is big).
+function drawHall(c, x, y, size, winter) {
+  const ox = x + 0.06, oy = y + 0.1;
+  c.fillStyle = 'rgba(0,0,0,0.18)'; c.fillRect(ox + 0.07, oy + 0.18, 0.88, 0.76);
+  c.fillStyle = '#f6efe0'; c.fillRect(ox, oy + 0.36, 0.88, 0.52);
+  c.fillStyle = '#d9cdb5'; c.fillRect(ox - 0.03, oy + 0.84, 0.94, 0.06); // steps
+  c.fillStyle = '#ffffff'; for (let k = 0; k < 4; k++) c.fillRect(ox + 0.08 + k * 0.22, oy + 0.42, 0.07, 0.42); // columns
+  c.fillStyle = '#7a4e2d'; c.fillRect(ox + 0.36, oy + 0.6, 0.16, 0.24);
+  c.fillStyle = '#b5523b'; c.beginPath(); c.moveTo(ox - 0.04, oy + 0.38); c.lineTo(ox + 0.44, oy + 0.18); c.lineTo(ox + 0.92, oy + 0.38); c.closePath(); c.fill();
+  if (winter) { c.fillStyle = 'rgba(255,255,255,0.9)'; c.beginPath(); c.moveTo(ox + 0.16, oy + 0.3); c.lineTo(ox + 0.44, oy + 0.18); c.lineTo(ox + 0.72, oy + 0.3); c.closePath(); c.fill(); }
+  // clock tower
+  c.fillStyle = '#efe4cc'; c.fillRect(ox + 0.32, oy - 0.08, 0.24, 0.32);
+  c.fillStyle = '#b5523b'; c.beginPath(); c.moveTo(ox + 0.29, oy - 0.07); c.lineTo(ox + 0.44, oy - 0.26); c.lineTo(ox + 0.59, oy - 0.07); c.closePath(); c.fill();
+  c.fillStyle = '#ffffff'; c.beginPath(); c.arc(ox + 0.44, oy + 0.07, 0.085, 0, 7); c.fill();
+  c.strokeStyle = '#4a3426'; c.lineWidth = 0.018; c.stroke();
+  c.beginPath(); c.moveTo(ox + 0.44, oy + 0.07); c.lineTo(ox + 0.44, oy + 0.015); c.moveTo(ox + 0.44, oy + 0.07); c.lineTo(ox + 0.48, oy + 0.08); c.stroke();
+  if (size >= 10) {
+    c.strokeStyle = '#6b4a3a'; c.lineWidth = 0.02; c.beginPath(); c.moveTo(ox + 0.44, oy - 0.26); c.lineTo(ox + 0.44, oy - 0.42); c.stroke();
+    c.fillStyle = '#e8584f'; c.beginPath(); c.moveTo(ox + 0.44, oy - 0.42); c.lineTo(ox + 0.6, oy - 0.37); c.lineTo(ox + 0.44, oy - 0.32); c.closePath(); c.fill();
+  }
 }
 
 function drawTree(c, x, y) {
@@ -2400,7 +2510,8 @@ function draw() {
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   for (const [e, x, y, size] of emo) { ctx.font = `${Math.round(size * view.s)}px ${EMOJI_FONT}`; ctx.fillText(e, sx(x), sy(y)); }
   const fs = clamp(view.s * 0.42, 11, 18);
-  for (const p of G.places) if (p.kind === 'town') pill(tn(p.name), sx(p.cx), sy(p.cy + 0.05), fs, 'rgba(255,250,235,0.92)', '#4a3426');
+  // town names sit just above the top row of houses, so the town hall in the middle stays visible
+  for (const p of G.places) if (p.kind === 'town') pill(tn(p.name), sx(p.cx), sy(Math.min(...p.tiles.map(ty)) - 0.2), fs, 'rgba(255,250,235,0.92)', '#4a3426');
   if (hover && (tool === 'look' || tool === 'station' || tool === 'train' || tool === 'boat')) {
     const sId = G.stn[hover.i], pId = G.occ[hover.i];
     const label = sId >= 0 ? `${stById(sId).dock ? '⚓' : '🚉'} ${tn(stById(sId).name)}` : pId >= 0 && G.places[pId].kind !== 'town' ? tn(G.places[pId].name) : null;
