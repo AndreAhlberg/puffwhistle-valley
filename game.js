@@ -219,7 +219,7 @@ const SV = {
   '❓ Looking for a way…': '❓ Letar efter en väg…', '🚂 Chugging along': '🚂 Tuffar på', '⏳ Loading at the station': '⏳ Lastar på stationen',
   'Route:': 'Rutt:', 'Carrying:': 'Last:', 'nothing yet': 'inget än', 'Wagons:': 'Vagnar:', 'Earned:': 'Tjänat:',
   '➕ Wagon': '➕ Vagn', '➖ Wagon': '➖ Vagn', 'Sure? 💰': 'Säker? 💰', '💰 Sell': '💰 Sälj',
-  'Waiting:': 'Väntar:', 'nothing': 'inget', 'Sends:': 'Skickar:', 'Wants:': 'Vill ha:', 'Near:': 'Nära:', 'nothing nearby': 'inget i närheten',
+  'Waiting:': 'Väntar:', 'nothing': 'inget', 'Sends:': 'Skickar:', 'Wants:': 'Vill ha:', 'Near:': 'Nära:', '🔗 Shares goods with:': '🔗 Delar varor med:', 'nothing nearby': 'inget i närheten',
   'Trains:': 'Tåg:', 'no trains yet': 'inga tåg än', 'Makes:': 'Gör:',
   '<b>Turns</b> {a} <b>into</b> {b}': '<b>Gör om</b> {a} <b>till</b> {b}',
   'Houses:': 'Hus:', 'Growing…': 'Växer…', '💡 Build a station nearby to connect it!': '💡 Bygg en station i närheten för att koppla in den!',
@@ -889,6 +889,31 @@ function supplies(st) {
   for (const id of st.places) { const k = KINDS[G.places[id].kind]; k.produces.forEach(t => r.add(t)); if (k.makes) r.add(k.makes); }
   return r;
 }
+// Stations and docks close together share goods: a boat can drop logs at a dock and a train at the station
+// next to it picks them up. The hub is every stop joined up within LINK tiles of another.
+const LINK = 3;
+const linkedTo = (a, b) => a !== b && Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) <= LINK;
+function hub(st) {
+  const out = [st];
+  for (let k = 0; k < out.length; k++) for (const s of G.stations) if (!out.includes(s) && linkedTo(out[k], s)) out.push(s);
+  return out;
+}
+const hubAccepts = st => { const r = new Set(); for (const s of hub(st)) accepts(s).forEach(t => r.add(t)); return r; };
+const hubSupplies = st => { const r = new Set(); for (const s of hub(st)) supplies(s).forEach(t => r.add(t)); return r; };
+const vehicles = () => [...G.trains, ...G.boats];
+const carries = (v, t) => !v.boat || BOATS[v.boat].takes(t);
+// Goods another train or boat at this hub can take on to a stop that wants them.
+function onward(st, not) {
+  const h = hub(st), ids = h.map(s => s.id), r = new Set();
+  for (const v of vehicles()) {
+    if (v === not || !v.route.some(id => ids.includes(id))) continue;
+    for (const id of v.route) {
+      const s2 = !ids.includes(id) && stById(id);
+      if (s2) for (const t of hubAccepts(s2)) if (carries(v, t)) r.add(t);
+    }
+  }
+  return r;
+}
 
 // ---------- trains ----------
 const trainLen = tr => ENG_LEN + tr.wagons * GAP;
@@ -944,7 +969,15 @@ function routeGoods(v) {
   const out = new Set();
   for (const a of v.route) {
     const sa = stById(a); if (!sa) continue;
-    for (const ty of supplies(sa)) for (const b of v.route) { const sb = b !== a && stById(b); if (sb && accepts(sb).has(ty)) out.add(ty); }
+    const got = hubSupplies(sa);
+    // goods other trains and boats could bring here from their own stops
+    const ids = hub(sa).map(s => s.id);
+    for (const u of vehicles()) if (u !== v && u.route.some(id => ids.includes(id)))
+      for (const id of u.route) { const s2 = !ids.includes(id) && stById(id); if (s2) for (const t of hubSupplies(s2)) if (carries(u, t)) got.add(t); }
+    for (const ty of got) for (const b of v.route) {
+      const sb = b !== a && stById(b);
+      if (sb && !hub(sa).includes(sb) && (hubAccepts(sb).has(ty) || onward(sb, v).has(ty))) out.add(ty);
+    }
   }
   for (const ty of v.prio || []) out.add(ty);
   return Object.keys(CARGO).filter(ty => out.has(ty) && (!v.boat || BOATS[v.boat].takes(ty)));
@@ -1583,24 +1616,36 @@ function arrive(tr) {
 
 function serve(tr, st) {
   let moved = 0;
-  const acc = accepts(st);
+  const h = hub(st), ids = h.map(s => s.id), acc = hubAccepts(st);
+  // stops further along the route, and what they want or can send on
+  const others = tr.route.filter(id => !ids.includes(id)).map(stById).filter(Boolean);
+  const direct = new Set(), want = new Set();
+  for (const s2 of others) { hubAccepts(s2).forEach(t => direct.add(t)); onward(s2, tr).forEach(t => want.add(t)); }
+  direct.forEach(t => want.add(t));
+  let pass = null;
   tr.load = tr.load.filter(l => {
-    if (l.from === st.id || !acc.has(l.type)) return true;
-    deliver(tr, st, l); moved += l.n; return false;
+    if (ids.includes(l.from)) return true;
+    if (acc.has(l.type)) { deliver(tr, st, l); moved += l.n; return false; }
+    // nobody on this route wants it, but someone here can take it on: leave it at the station
+    if (direct.has(l.type) || !(pass = pass || onward(st, tr)).has(l.type)) return true;
+    const n = Math.min(l.n, STN_CAP - (st.cargo[l.type] || 0));
+    if (n <= 0) return true;
+    deliver(tr, st, { ...l, n }, true); st.cargo[l.type] = (st.cargo[l.type] || 0) + n; moved += n;
+    l.n -= n; return l.n > 0;
   });
-  const want = new Set();
-  for (const id of tr.route) { const s2 = id !== st.id && stById(id); if (s2) accepts(s2).forEach(t => want.add(t)); }
   let room = capacity(tr) - loaded(tr);
   const prio = (tr.prio || []).filter(t => CARGO[t]);
-  let types = Object.keys(st.cargo).filter(t => st.cargo[t] > 0 && want.has(t) && (!tr.boat || BOATS[tr.boat].takes(t)));
+  const pile = t => h.reduce((a, s) => a + (s.cargo[t] || 0), 0);
+  const take = t => { const s = h.find(s => s.cargo[t] > 0); s.cargo[t]--; };
+  let types = Object.keys(CARGO).filter(t => pile(t) > 0 && want.has(t) && carries(tr, t));
   if (tr.only && prio.length) types = types.filter(t => prio.includes(t));
   // ⭐ priority goods load first, in the order they were picked; the rest share what room is left
   const groups = [...prio.map(p => types.filter(t => t === p)), types.filter(t => !prio.includes(t))];
   for (const grp of groups) {
-    while (room > 0 && grp.some(t => st.cargo[t] > 0)) {
+    while (room > 0 && grp.some(t => pile(t) > 0)) {
       for (const t of grp) {
-        if (room <= 0 || st.cargo[t] <= 0) continue;
-        st.cargo[t]--; room--; moved++;
+        if (room <= 0 || pile(t) <= 0) continue;
+        take(t); room--; moved++;
         let l = tr.load.find(q => q.type === t && q.from === st.id);
         if (!l) tr.load.push(l = { type: t, from: st.id, n: 0 });
         l.n++;
@@ -1610,14 +1655,16 @@ function serve(tr, st) {
   return moved;
 }
 
-function deliver(tr, st, l) {
+// A handover pays for the trip so far; only the last trip counts as delivered and helps towns and factories.
+function deliver(tr, st, l, handover) {
   const from = stById(l.from);
   const dist = from ? Math.abs(from.x - st.x) + Math.abs(from.y - st.y) : 6;
   const bonus = season().bonus === l.type ? 2 : 1;
   const pay = Math.max(1, Math.round(l.n * CARGO[l.type].rate * (0.6 + dist / 10) * bonus * D().pay));
   G.coins += pay; tr.earned += pay; G.stats.earned += pay;
+  if (handover) { floater(st.x + 0.5, st.y + 0.2, `🔁 ${CARGO[l.type].e} +${pay}🪙`, '#bfe2f4'); sfx('coin'); return; }
   G.stats.delivered[l.type] = (G.stats.delivered[l.type] || 0) + l.n;
-  const ps = st.places.map(id => G.places[id]).filter(p => KINDS[p.kind].accepts.includes(l.type));
+  const ps = [...new Set(hub(st).flatMap(s => s.places))].map(id => G.places[id]).filter(p => KINDS[p.kind].accepts.includes(l.type));
   const fac = ps.find(p => KINDS[p.kind].makes);
   if (fac) { const m = KINDS[fac.kind].makes; fac.stock[m] = (fac.stock[m] || 0) + l.n; }
   else {
@@ -2547,6 +2594,14 @@ function catchRect(x, y, fill, stroke) {
   ctx.strokeStyle = stroke; ctx.lineWidth = 0.06; ctx.setLineDash([0.2, 0.12]);
   ctx.strokeRect(x - CATCH, y - CATCH, CATCH * 2 + 1, CATCH * 2 + 1); ctx.setLineDash([]);
 }
+// Dashed blue lines to the stations and docks that share goods with a stop at (x, y).
+function linkLines(x, y, st) {
+  const at = { x, y }, near = st ? hub(st).slice(1) : G.stations.filter(s => linkedTo(at, s));
+  ctx.strokeStyle = '#5bc0eb'; ctx.lineWidth = 0.1; ctx.setLineDash([0.18, 0.12]);
+  for (const s of near) { ctx.beginPath(); ctx.moveTo(x + 0.5, y + 0.5); ctx.lineTo(s.x + 0.5, s.y + 0.5); ctx.stroke(); }
+  ctx.setLineDash([]);
+  for (const s of near) emo.push(['🔗', s.x + 0.5, s.y + 1.25, 0.36]);
+}
 function outlinePlace(p, col) {
   ctx.strokeStyle = col; ctx.lineWidth = 0.08;
   for (const i of p.tiles) ctx.strokeRect(tx(i) + 0.06, ty(i) + 0.06, 0.88, 0.88);
@@ -2554,7 +2609,7 @@ function outlinePlace(p, col) {
 
 function drawOverlay() {
   const selSt = sel && sel.type === 'station' && stById(sel.id);
-  if (selSt) { catchRect(selSt.x, selSt.y, 'rgba(255,230,100,0.18)', '#f2b632'); selSt.places.forEach(id => outlinePlace(G.places[id], '#ffffff')); }
+  if (selSt) { catchRect(selSt.x, selSt.y, 'rgba(255,230,100,0.18)', '#f2b632'); selSt.places.forEach(id => outlinePlace(G.places[id], '#ffffff')); linkLines(selSt.x, selSt.y, selSt); }
   const selTr = sel && sel.type === 'train' && trById(sel.id);
   if (selTr) drawRoute(selTr.route, selTr.color, false);
   if (tool === 'train') drawRoute(routeDraft, '#ff7a59', true);
@@ -2591,11 +2646,11 @@ function drawOverlay() {
     ctx.strokeStyle = ok ? '#3fb36b' : '#e74c3c'; ctx.lineWidth = 0.08; ctx.strokeRect(x + 0.04, y + 0.04, 0.92, 0.92);
   } else if (tool === 'boat' && boatMode === 'dock') {
     const ok = dockOk(i);
-    if (ok) catchRect(x, y, 'rgba(255,230,100,0.22)', '#f2b632');
+    if (ok) { catchRect(x, y, 'rgba(255,230,100,0.22)', '#f2b632'); linkLines(x, y); }
     ctx.strokeStyle = ok ? '#3fb36b' : '#e74c3c'; ctx.lineWidth = 0.1; ctx.strokeRect(x + 0.05, y + 0.05, 0.9, 0.9);
   } else if (tool === 'station') {
     const ok = (G.conn[i] === 5 || G.conn[i] === 10) && G.stn[i] < 0 && G.terr[i] !== WATER && G.terr[i] !== HILL && !G.road[i];
-    catchRect(x, y, 'rgba(255,230,100,0.22)', '#f2b632');
+    catchRect(x, y, 'rgba(255,230,100,0.22)', '#f2b632'); if (ok) linkLines(x, y);
     for (const p of G.places) if (p.tiles.some(t => Math.abs(tx(t) - x) <= CATCH && Math.abs(ty(t) - y) <= CATCH)) outlinePlace(p, '#ffffff');
     ctx.strokeStyle = ok ? '#3fb36b' : '#e74c3c'; ctx.lineWidth = 0.1; ctx.strokeRect(x + 0.05, y + 0.05, 0.9, 0.9);
   } else if (((tool === 'track' || tool === 'road') && !draft) || tool === 'remove') {
@@ -2951,14 +3006,15 @@ function panelHTML() {
   }
   if (sel.type === 'station') {
     const s = stById(sel.id); if (!s) return '';
-    const near = s.places.map(id => tn(G.places[id].name)).join(', ') || t('nothing nearby');
+    const near = s.places.map(id => tn(G.places[id].name)).join(', ') || t('nothing nearby'), links = hub(s).slice(1);
     const visits = s.dock ? G.boats.filter(bt => bt.route.includes(s.id)).map(boatName).join(', ') || t('no boats yet')
       : G.trains.filter(tr => tr.route.includes(s.id)).map(tr => esc(tn(tr.name))).join(', ') || t('no trains yet');
     return `<div class="ph">${s.dock ? '⚓' : '🚉'} ${tn(s.name)}${close}</div>
       <div class="row"><b>${t('Waiting:')}</b> ${cargoList(s.cargo) || t('nothing')}</div>
-      <div class="row"><b>${t('Sends:')}</b> ${emojis([...supplies(s)]) || '—'}</div>
-      <div class="row"><b>${t('Wants:')}</b> ${emojis([...accepts(s)]) || '—'}</div>
+      <div class="row"><b>${t('Sends:')}</b> ${emojis([...hubSupplies(s)]) || '—'}</div>
+      <div class="row"><b>${t('Wants:')}</b> ${emojis([...hubAccepts(s)]) || '—'}</div>
       <div class="row"><b>${t('Near:')}</b> ${near}</div>
+      ${links.length ? `<div class="row"><b>${t('🔗 Shares goods with:')}</b> ${links.map(l => tn(l.name)).join(', ')}</div>` : ''}
       <div class="row"><b>${t(s.dock ? 'Boats:' : 'Trains:')}</b> ${visits}</div>`;
   }
   if (sel.type === 'place') {
@@ -3677,7 +3733,7 @@ if (/[?&]debug\b/.test(location.search)) {
     setTool, produce, idx, KINDS, CARGO, save, load, undo, beginAct, endAct, placeDeco, draftStart, draftTo, draftCommit,
     darkness, seasonIx, gateDown, buyBus, sellBus, roadRoute, pick, panelAct, panelHTML, deliver, makeQuest,
     get sel() { return sel; }, set sel(v) { sel = v; },
-    get W() { return W; }, get H() { return H; }, view, zoomAt, centerOn, clampView, minScale, startScenario, openMaps, checkGoal, SCENARIOS, SIZES, sized, DIFFS, price, trainRun, busRun, payRunning, toggleSignal, updTaken, sigLimit, posAt, checkCrashes, rescueTrain, get taken() { return taken; }, get mapAdv() { return mapAdv; }, set mapAdv(v) { mapAdv = v; }, get mapDiff() { return mapDiff; }, set mapDiff(v) { mapDiff = v; }, get mapSize() { return mapSize; }, setRoute, routeGoods, goodsHTML, serve, routeAct, routeBarHTML, get editTrain() { return editTrain; }, get routeDraft() { return routeDraft; }, buildDock, buyBoat, sellBoat, waterPath, dockOk, boatToolClick, get boatMode() { return boatMode; }, set boatMode(v) { boatMode = v; }, BOATS, copySaveText, loadSaveText, roadsChanged, connectRoad, roadLinkCost, get roadsN() { return G.roads.length; }, snapshot, readSlot, slotAct, loadSave, openSaves, exportSave, SLOTS, set mapSize(v) { mapSize = v; }, resize, get cars() { return cars; }, get undoStack() { return undoStack; }, get draft() { return draft; },
+    get W() { return W; }, get H() { return H; }, view, zoomAt, centerOn, clampView, minScale, startScenario, openMaps, checkGoal, SCENARIOS, SIZES, sized, DIFFS, price, trainRun, busRun, payRunning, toggleSignal, updTaken, sigLimit, posAt, checkCrashes, rescueTrain, get taken() { return taken; }, get mapAdv() { return mapAdv; }, set mapAdv(v) { mapAdv = v; }, get mapDiff() { return mapDiff; }, set mapDiff(v) { mapDiff = v; }, get mapSize() { return mapSize; }, setRoute, routeGoods, goodsHTML, serve, hub, hubAccepts, onward, routeAct, routeBarHTML, get editTrain() { return editTrain; }, get routeDraft() { return routeDraft; }, buildDock, buyBoat, sellBoat, waterPath, dockOk, boatToolClick, get boatMode() { return boatMode; }, set boatMode(v) { boatMode = v; }, BOATS, copySaveText, loadSaveText, roadsChanged, connectRoad, roadLinkCost, get roadsN() { return G.roads.length; }, snapshot, readSlot, slotAct, loadSave, openSaves, exportSave, SLOTS, set mapSize(v) { mapSize = v; }, resize, get cars() { return cars; }, get undoStack() { return undoStack; }, get draft() { return draft; },
   };
 }
 })();

@@ -29,6 +29,12 @@ Or open `index.html` in a browser. There's no build step and no server needed.
     that the water joins up with. Boats steer their own way over rivers and the sea, need no track, and load and
     unload like trains. Ferries only carry passengers; cargo ships carry everything else. Removing a dock sends
     its boats back to the boatyard. Boats never crash, even in advanced mode.
+- **🔗 Sharing stations**: stations and docks within 3 tiles of each other share their goods, as if they were one
+  big stop. A cargo ship can drop logs at a dock, and a train at the station next to it takes them on to the toy
+  workshop. Goods are left for the next ride only when the vehicle's own route has nowhere that wants them and another
+  train or boat at the hub can carry them there. The handover pays 🔁 for the trip so far. Blue dashed lines show the
+  links while you place a station or dock, or when you click one. Linked stops count as the same stop, so a route
+  between two of them carries nothing.
 - **🌷 Decorate**: flowers, trees, fences (they join up), benches, lamp posts (they glow at night), duck
   ponds, windmills, and snowmen (winter only; they melt in spring). Drag to place lots.
 - **👆 Look**: click trains, buses, stations, towns and industries. Add or remove wagons, or sell a train
