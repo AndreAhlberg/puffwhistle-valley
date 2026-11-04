@@ -29,7 +29,14 @@ Or open `index.html` in a browser. There's no build step and no server needed.
     that the water joins up with. Boats steer their own way over rivers and the sea, need no track, and load and
     unload like trains. Ferries only carry passengers; cargo ships carry everything else. Removing a dock sends
     its boats back to the boatyard. Boats never crash, even in advanced mode.
-- **🔗 Sharing stations**: stations and docks within 3 tiles of each other share their goods, as if they were one
+- **✈️ Planes** (key `A`): the bar at the top picks what to do.
+  - **🛫 Airport** (90🪙): click flat, empty land with room for 3×2 tiles (trees are cleared). The tower, terminal and
+    hangar sit on the top row with the runway below, and the airport serves everything in its bigger 7×8 yellow square.
+  - **✈️ Plane** (150🪙, 12 passengers) or **🛩️ Cargo plane** (200🪙, 16 goods): click one airport, then another. Planes
+    fly straight there over everything: they roll down the runway, climb up off their shadow, and land at the other end.
+    They're the fastest way across a big valley but cost the most to run. Removing an airport sends its planes back to
+    the hangar.
+- **🔗 Sharing stations**: stations, docks and airports within 3 tiles of each other share their goods, as if they were one
   big stop. A cargo ship can drop logs at a dock, and a train at the station next to it takes them on to the toy
   workshop. Goods are left for the next ride only when the vehicle's own route has nowhere that wants them and another
   train or boat at the hub can carry them there. The handover pays 🔁 for the trip so far. Blue dashed lines show the
@@ -51,7 +58,7 @@ Or open `index.html` in a browser. There's no build step and no server needed.
 - **↩️ Undo**: each drag or click is one step, up to 30 back. Buying a train clears the undo history.
 - **Moving around**: scroll or pinch to zoom. Drag with 👆 Look, or with the right or middle mouse button
   in any tool, to pan. The ➕ ➖ ⤢ buttons also zoom, and clicking the minimap in the corner jumps there.
-- Keys: `1`–`9` pick tools (`0` is the 🚦 signal tool in advanced mode), `Z` undoes, `Space` pauses, `Enter` sends off a new train, `Esc` cancels,
+- Keys: `1`–`9` pick tools (`0` is the 🚦 signal tool in advanced mode), `A` picks ✈️ Planes, `Z` undoes, `Space` pauses, `Enter` sends off a new train, `Esc` cancels,
   arrow keys pan, `+`/`-` zoom and `0` shows the whole map.
 
 ## Saving

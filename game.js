@@ -8,7 +8,7 @@ const MAX_S = 72; // most zoomed-in: CSS pixels per tile
 const DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0]; // N E S W
 const OPP = d => (d + 2) & 3;
 const GRASS = 0, WATER = 1, TREE = 2, HILL = 3;
-const COST = { track: 2, bridge: 8, tunnel: 6, station: 15, wagon: 10, signal: 12, road: 3, roadBridge: 10, dock: 20 };
+const COST = { track: 2, bridge: 8, tunnel: 6, station: 15, wagon: 10, signal: 12, road: 3, roadBridge: 10, dock: 20, airport: 90 };
 const CATCH = 2, WAGON_CAP = 8, MAX_WAGONS = 6, GAP = 0.58, ENG_LEN = 0.62, STN_CAP = 60, PROD_EVERY = 5;
 const SEASON_LEN = 150, DAY_LEN = 120, NIGHT_DARK = 0.5, UNDO_MAX = 30;
 const SAVE_KEY = 'puffwhistle-save-v1', MUSIC_KEY = 'puffwhistle-music';
@@ -50,6 +50,9 @@ const COST_BUS = 40, BUS_CAP = 10, BUS_SPEED = 1.5;
 const BOATS = {
   ferry: { name: 'Ferry', e: '⛴️', cost: 45, cap: 16, speed: 1.5, takes: t => t === 'people' },
   cargo: { name: 'Cargo ship', e: '🚢', cost: 70, cap: 24, speed: 1.1, takes: t => t !== 'people' },
+  // planes use the same routes, loading and panels as boats, but fly straight between airports
+  plane: { name: 'Plane', e: '✈️', cost: 150, cap: 12, speed: 4.2, air: true, takes: t => t === 'people' },
+  freighter: { name: 'Cargo plane', e: '🛩️', cost: 200, cap: 16, speed: 3.4, air: true, takes: t => t !== 'people' },
 };
 const BOAT_COLS = ['#e74c3c', '#2d98da', '#20bf6b', '#f39c12', '#9b59b6'];
 // Maps. Free play has no goal; scenarios have one, rated ⭐⭐⭐/⭐⭐/⭐ by game time (par = 3-star and 2-star limits).
@@ -286,6 +289,16 @@ const SV = {
   'Nothing on this route to choose between yet.': 'Det finns inget att välja mellan på den här rutten än.',
   '⭐ Priority goods': '⭐ Viktiga varor', 'load first, in this order': 'lastas först, i den här ordningen',
   '✅ Only carry ⭐ goods': '✅ Kör bara ⭐ varor', '⬜ Only carry ⭐ goods': '⬜ Kör bara ⭐ varor', 'Priority:': 'Viktigast:', 'only these': 'bara de här',
+  'Planes': 'Flyg', 'Planes (A)': 'Flyg (A)', 'Airport': 'Flygplats', 'Plane': 'Flygplan', 'Cargo plane': 'Fraktflygplan', 'Plane {n}': 'Flygplan {n}', 'Cargo plane {n}': 'Fraktflygplan {n}',
+  'Planes:': 'Flygplan:', 'no planes yet': 'inga flygplan än', '☁️ Flying': '☁️ Flyger', '🛬 On the runway': '🛬 På landningsbanan', '🛫 At the airport': '🛫 På flygplatsen',
+  'Whoosh!': 'Svisch!', '{name} is ready for take-off! {e}': '{name} är redo att lyfta! {e}', '{name} went back to the hangar.': '{name} åkte tillbaka till hangaren.',
+  'Click on an airport! ✈️': 'Klicka på en flygplats! ✈️', "Trains can't go to an airport! Use ✈️ Planes.": 'Tåg kan inte åka till en flygplats! Använd ✈️ Flyg.',
+  'A ⚓ dock or ✈️ airport is in the way!': 'En ⚓ brygga eller ✈️ flygplats är i vägen!',
+  'An airport needs a clear flat patch of land, 3 wide and 2 tall! ✈️': 'En flygplats behöver en tom, platt bit mark, 3 bred och 2 hög! ✈️',
+  'Nothing is near this airport. Try inside the yellow square!': 'Inget finns nära flygplatsen. Prova inuti den gula rutan!',
+  'Click on flat, empty land to build a ✈️ airport. It needs room for a runway: 3 tiles wide and 2 tall.': 'Klicka på platt, tom mark för att bygga en ✈️ flygplats. Den behöver plats för en landningsbana: 3 rutor bred och 2 hög.',
+  'Click the airport where your plane should start. ✈️ Planes carry passengers, 🛩️ cargo planes carry goods.': 'Klicka på flygplatsen där ditt flygplan ska starta. ✈️ Flygplan tar passagerare, 🛩️ fraktflygplan tar varor.',
+  'Now click another airport to fly to!': 'Klicka nu på en annan flygplats att flyga till!',
   'Boats': 'Båtar', 'Dock': 'Brygga', 'Ferry': 'Färja', 'Cargo ship': 'Lastfartyg', 'Ferry {n}': 'Färja {n}', 'Cargo ship {n}': 'Lastfartyg {n}',
   'Docks go on the water, right next to the shore! ⚓': 'Bryggor byggs på vattnet, precis vid stranden! ⚓', 'A bridge is in the way! ⚓': 'En bro är i vägen! ⚓',
   'Nothing is near this dock. Try inside the yellow square!': 'Inget finns nära den här bryggan. Prova inom den gula rutan!',
@@ -370,6 +383,8 @@ function tn(name) {
   if (NAMES_SV[name]) return NAMES_SV[name];
   const dk = /^(.*) Dock( \d+)?$/.exec(name);
   if (dk) return `${tn(dk[1])} brygga${dk[2] || ''}`;
+  const ap = /^(.*) Airport( \d+)?$/.exec(name);
+  if (ap) return `${tn(ap[1])} flygplats${ap[2] || ''}`;
   const m = /^(.*) (North|East|South|West)( \d+)?$/.exec(name);
   if (m) return `${tn(m[1])} ${SIDES_SV[m[2]]}${m[3] || ''}`;
   const num = /^(.*) (\d+)$/.exec(name); // a second "Sunny Farm 2" on a big map
@@ -412,6 +427,11 @@ let draft = null, draftDeco = 'flowers', act = null, curSeason = -1;
 const undoStack = [];
 
 const stById = id => G.stations.find(s => s.id === id);
+// An airport is 3 tiles wide and 2 tall: tower, terminal and hangar on top, the runway below. (x, y) is the terminal.
+const airTiles = s => [-1, 0, 1].flatMap(dx => [0, 1].map(dy => idx(s.x + dx, s.y + dy)));
+const stnTiles = s => s.air ? airTiles(s) : [idx(s.x, s.y)];
+const railStn = s => !s.dock && !s.air;
+const catchR = s => s.air ? CATCH + 1 : CATCH;
 const trById = id => G.trains.find(t => t.id === id);
 const seasonIx = () => scn().season ?? Math.floor(G.time / SEASON_LEN) % 4;
 const season = () => SEASONS[seasonIx()];
@@ -650,7 +670,7 @@ function roadLinkCost(a, d, pend) {
   if (G.occ[a] >= 0 || G.occ[b] >= 0) return { err: "Roads can't go through buildings!" };
   if (G.terr[a] === HILL || G.terr[b] === HILL) return { err: 'Roads go around hills, not through them! ⛰️' };
   if (G.deco[a] || G.deco[b]) return { err: 'Something pretty is in the way! Tidy it with 🧹 first.' };
-  if ((G.stn[a] >= 0 && stById(G.stn[a]).dock) || (G.stn[b] >= 0 && stById(G.stn[b]).dock)) return { err: 'A ⚓ dock is in the way!' };
+  if ((G.stn[a] >= 0 && !railStn(stById(G.stn[a]))) || (G.stn[b] >= 0 && !railStn(stById(G.stn[b])))) return { err: 'A ⚓ dock or ✈️ airport is in the way!' };
   for (const [i, e] of [[a, d], [b, OPP(d)]]) {
     const c = G.conn[i]; if (!c) continue;
     if (G.stn[i] >= 0) return { err: "Roads can't go through a station! 🚉" };
@@ -720,7 +740,7 @@ function beginAct() {
   act = {
     changed: false, coins: G.coins, terr: G.terr.slice(), conn: G.conn.slice(), deco: G.deco.slice(), sig: G.sig.slice(),
     road: G.road.slice(), roads: G.roads.slice(), buses: G.buses.slice(),
-    stations: G.stations.map(({ id, x, y, name, cargo, dock }) => ({ id, x, y, name, cargo: { ...cargo }, dock })),
+    stations: G.stations.map(({ id, x, y, name, cargo, dock, air }) => ({ id, x, y, name, cargo: { ...cargo }, dock, air })),
     boats: G.boats.slice(),
     routes: G.trains.map(tr => [tr.id, tr.route.slice()]), trains: G.trains.slice(),
   };
@@ -758,10 +778,10 @@ function undo() {
     G.conn[i] = 0; G.road[i] = 0; G.deco[i] = 0; G.terr[i] = GRASS;
   }
   if (roadUndone) { initCars(); roadsChanged(); }
-  G.stations = a.stations.filter(s => G.occ[idx(s.x, s.y)] < 0 && (s.dock ? G.terr[idx(s.x, s.y)] === WATER : G.conn[idx(s.x, s.y)]))
+  G.stations = a.stations.filter(s => s.air ? airTiles(s).every(i => G.occ[i] < 0 && !G.conn[i] && !G.road[i]) : G.occ[idx(s.x, s.y)] < 0 && (s.dock ? G.terr[idx(s.x, s.y)] === WATER : G.conn[idx(s.x, s.y)]))
     .map(s => ({ ...s, cargo: (stById(s.id) || s).cargo, places: [] }));
   G.stn.fill(-1);
-  for (const s of G.stations) G.stn[idx(s.x, s.y)] = s.id;
+  for (const s of G.stations) for (const i of stnTiles(s)) G.stn[i] = s.id;
   refreshCatch();
   for (const tr of a.lost) if (!tr.crashed) G.trains.push(tr);
   for (const bt of a.lostBoats) if (bt.route.every(id => stById(id))) { G.boats.push(bt); dockBoat(bt, stById(bt.target) || stById(bt.route[0])); }
@@ -822,7 +842,7 @@ function buildStation(i) {
   let best = null, bd = 1e9;
   for (const p of G.places) { const d = Math.hypot(p.cx - x - 0.5, p.cy - y - 0.5); if (d < bd) { bd = d; best = p; } }
   let name = best && bd < 9 ? best.name : 'Meadow';
-  if (G.stations.some(s => s.name === name && !s.dock)) {
+  if (G.stations.some(s => s.name === name && railStn(s))) {
     const dx = x + 0.5 - (best ? best.cx : 0), dy = y + 0.5 - (best ? best.cy : 0);
     const side = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'East' : 'West') : (dy > 0 ? 'South' : 'North');
     let n = `${name} ${side}`, k = 2;
@@ -865,10 +885,10 @@ function removeTile(i) {
 
 function removeStation(id) {
   const st = stById(id); if (!st) return;
-  G.stn[idx(st.x, st.y)] = -1;
+  for (const i of stnTiles(st)) G.stn[i] = -1;
   G.stations = G.stations.filter(s => s !== st);
-  G.coins += Math.floor(price(st.dock ? COST.dock : COST.station) / 2);
-  for (const bt of G.boats.slice()) if (bt.route.includes(id)) { sellBoat(bt); toast(t('{name} went back to the boatyard.', { name: boatName(bt) })); }
+  G.coins += Math.floor(price(st.dock ? COST.dock : st.air ? COST.airport : COST.station) / 2);
+  for (const bt of G.boats.slice()) if (bt.route.includes(id)) { sellBoat(bt); toast(t(st.air ? '{name} went back to the hangar.' : '{name} went back to the boatyard.', { name: boatName(bt) })); }
   for (const tr of G.trains.slice()) {
     if (!tr.route.includes(id)) continue;
     tr.route = tr.route.filter(r => r !== id);
@@ -880,7 +900,8 @@ function removeStation(id) {
 
 function refreshCatch() {
   for (const s of G.stations) {
-    s.places = G.places.filter(p => p.tiles.some(i => Math.abs(tx(i) - s.x) <= CATCH && Math.abs(ty(i) - s.y) <= CATCH)).map(p => p.id);
+    const r = catchR(s), cy = s.air ? 0.5 : 0;
+    s.places = G.places.filter(p => p.tiles.some(i => Math.abs(tx(i) - s.x) <= r && Math.abs(ty(i) - s.y - cy) <= r + cy)).map(p => p.id);
   }
 }
 function accepts(st) { const r = new Set(); for (const id of st.places) for (const t of KINDS[G.places[id].kind].accepts) r.add(t); return r; }
@@ -956,7 +977,7 @@ function sellTrain(tr) {
 // A new list of stops for a train that's already running. It finishes the trip it's on, then follows the new route
 // (a stop that was taken off just sends it on to the first stop of the new one).
 function setRoute(tr, route) {
-  route = route.filter(id => stById(id) && !stById(id).dock);
+  route = route.filter(id => stById(id) && railStn(stById(id)));
   if (route.length < 2) return fail('A train needs at least two stations!');
   tr.route = route.slice();
   undoStack.length = 0; // older undo steps would put the old route back
@@ -1340,26 +1361,30 @@ function smoothPts(pts) {
   return pts;
 }
 const boatById = id => G.boats.find(b => b.id === id);
-const boatName = bt => t(bt.boat === 'ferry' ? 'Ferry {n}' : 'Cargo ship {n}', { n: bt.n });
-const boatRun = bt => Math.round((BOATS[bt.boat].cost * 0.12 + 2) * D().run);
+const boatName = bt => t({ ferry: 'Ferry {n}', cargo: 'Cargo ship {n}', plane: 'Plane {n}', freighter: 'Cargo plane {n}' }[bt.boat], { n: bt.n });
+const boatRun = bt => Math.round((BOATS[bt.boat].cost * (BOATS[bt.boat].air ? 0.16 : 0.12) + 2) * D().run);
+// Where a boat ties up, or a plane parks on the runway.
+const portPt = st => st.air ? [st.x + 0.5, st.y + 1.5] : center(idx(st.x, st.y));
 function dockBoat(bt, st) {
   bt.target = st.id; bt.state = 'stop'; bt.timer = 1;
-  bt.trail = mkTrail([center(idx(st.x, st.y))]); bt.s = 0; bt.a = bt.a || 0; bt.wakeT = 0;
+  bt.trail = mkTrail([portPt(st)]); bt.s = 0; bt.a = bt.a || 0; bt.wakeT = 0;
 }
 function buyBoat(kind, a, b) {
   const B = BOATS[kind], sa = stById(a), sb = stById(b);
-  if (!B || !sa || !sb || !sa.dock || !sb.dock) return false;
-  if (!waterPath(idx(sa.x, sa.y), idx(sb.x, sb.y))) return fail("Boats can't sail between those docks. The water isn't joined up! 🌊");
+  const port = B && (B.air ? 'air' : 'dock');
+  if (!B || !sa || !sb || !sa[port] || !sb[port]) return false;
+  if (!B.air && !waterPath(idx(sa.x, sa.y), idx(sb.x, sb.y))) return fail("Boats can't sail between those docks. The water isn't joined up! 🌊");
   if (G.coins < price(B.cost)) return fail('Not enough coins 🪙');
   G.coins -= price(B.cost);
   undoStack.length = 0; // like trains, undo only reaches back to the last boat bought
-  G.boatN = (G.boatN || 0) + 1;
-  const bt = { id: G.nextId++, boat: kind, n: G.boatN, route: [a, b], target: a, load: [], earned: 0, color: BOAT_COLS[(G.boatN - 1) % BOAT_COLS.length] };
+  const nk = B.air ? 'airN' : 'boatN';
+  G[nk] = (G[nk] || 0) + 1;
+  const bt = { id: G.nextId++, boat: kind, n: G[nk], route: [a, b], target: a, load: [], earned: 0, color: BOAT_COLS[(G[nk] - 1) % BOAT_COLS.length] };
   dockBoat(bt, sa);
   G.boats.push(bt);
   sel = { type: 'boat', id: bt.id };
   sfx('toot'); puff(sa.x + 0.5, sa.y + 0.5, 8, '#ffffff');
-  toast(t('{name} sets sail! {e}', { name: boatName(bt), e: B.e }));
+  toast(t(B.air ? '{name} is ready for take-off! {e}' : '{name} sets sail! {e}', { name: boatName(bt), e: B.e }));
   return true;
 }
 function sellBoat(bt) {
@@ -1372,14 +1397,22 @@ function updBoat(bt, dt) {
   if (bt.state !== 'run') {
     bt.timer -= dt; if (bt.timer > 0) return;
     const from = stById(bt.target), nextId = bt.route[(bt.route.indexOf(bt.target) + 1) % bt.route.length], to = stById(nextId);
-    const path = from && to && waterPath(idx(from.x, from.y), idx(to.x, to.y));
+    const air = BOATS[bt.boat].air;
+    const path = from && to && (air ? flightPts(from, to) : waterPath(idx(from.x, from.y), idx(to.x, to.y)));
     if (!path) { bt.state = 'lost'; bt.timer = 3; return; }
-    bt.trail = mkTrail(smoothPts(path.map(center))); bt.s = 0; bt.target = nextId; bt.state = 'run';
+    bt.trail = mkTrail(smoothPts(air ? path : path.map(center))); bt.s = 0; bt.target = nextId; bt.state = 'run';
     return;
   }
-  bt.s += BOATS[bt.boat].speed * dt;
+  const air = BOATS[bt.boat].air;
+  bt.s += BOATS[bt.boat].speed * dt * (air ? 0.3 + 0.7 * alt(bt) : 1);
   bt.wakeT -= dt;
-  if (bt.wakeT <= 0) {
+  if (air) {
+    if (bt.wakeT <= 0 && alt(bt) > 0.95) { // a little puffy trail high up
+      bt.wakeT = 0.25;
+      const p = craftPos(bt), a = angAt(bt.trail, bt.s);
+      smoke.push({ x: p.x - Math.cos(a) * 0.45, y: p.y - Math.sin(a) * 0.45, vx: 0, vy: 0, r: 0.05, life: 0, max: 1.2, col: '#ffffff' });
+    }
+  } else if (bt.wakeT <= 0) {
     bt.wakeT = 0.18;
     const a = angAt(bt.trail, bt.s), p = posAt(bt.trail, bt.s - 0.4);
     smoke.push({ x: p.x, y: p.y, vx: -Math.cos(a) * 0.1, vy: -Math.sin(a) * 0.1, r: 0.06, life: 0, max: 0.9, col: '#e8f6ff' });
@@ -1390,16 +1423,53 @@ function updBoat(bt, dt) {
     bt.timer = 1.5 + (st ? serve(bt, st) : 0) * 0.04;
   }
 }
+// Planes take off along the runway, fly straight across, then land and roll to the middle of the other runway.
+function flightPts(a, b) {
+  const pa = portPt(a), pb = portPt(b), dir = pb[0] >= pa[0] ? 1 : -1;
+  return [pa, [pa[0] + dir * 1.3, pa[1]], [pb[0] - dir * 1.3, pb[1]], pb];
+}
+// 0 on the ground, 1 at full height, climbing over the first stretch after the runway.
+const alt = bt => bt.state !== 'run' ? 0 : clamp(Math.min(bt.s - 1.1, trailEnd(bt) - 1.1 - bt.s) / 2.2, 0, 1);
+// Where a boat is drawn, or a plane in the sky (lifted up off its shadow).
+function craftPos(bt) {
+  const p = posAt(bt.trail, bt.s);
+  return BOATS[bt.boat].air ? { x: p.x, y: p.y - alt(bt) * 0.8 } : p;
+}
+function airportOk(i) {
+  const x = tx(i), y = ty(i);
+  if (x < 1 || x > W - 2 || y > H - 2) return false;
+  return airTiles({ x, y }).every(j => (G.terr[j] === GRASS || G.terr[j] === TREE) && G.occ[j] < 0 && !G.conn[j] && !G.road[j] && G.stn[j] < 0 && !G.deco[j]);
+}
+function buildAirport(i) {
+  if (G.stn[i] >= 0) return false;
+  if (!airportOk(i)) return fail('An airport needs a clear flat patch of land, 3 wide and 2 tall! ✈️');
+  if (G.coins < price(COST.airport)) return fail('Not enough coins 🪙');
+  const x = tx(i), y = ty(i);
+  let best = null, bd = 1e9;
+  for (const p of G.places) { const d = Math.hypot(p.cx - x - 0.5, p.cy - y - 1); if (d < bd) { bd = d; best = p; } }
+  const base = `${best && bd < 10 ? best.name : 'Meadow'} Airport`;
+  let name = base, k = 2;
+  while (G.stations.some(s => s.name === name)) name = `${base} ${k++}`;
+  G.coins -= price(COST.airport);
+  const st = { id: G.nextId++, x, y, name, cargo: {}, places: [], air: true };
+  for (const j of airTiles(st)) { G.terr[j] = GRASS; G.stn[j] = st.id; }
+  G.stations.push(st);
+  refreshCatch(); touch(); dirty = true; sfx('pop'); puff(x + 0.5, y + 1, 10, '#ffffff');
+  if (!st.places.length) toast(t('Nothing is near this airport. Try inside the yellow square!'));
+  return true;
+}
 function boatToolClick(tile) {
   if (boatMode === 'dock') { buildDock(tile.i); return; }
-  const id = G.stn[tile.i], st = id >= 0 && stById(id);
-  if (!st || !st.dock) { toast(t('Click on a dock! ⚓')); return; }
+  if (boatMode === 'airport') { buildAirport(tile.i); return; }
+  const id = G.stn[tile.i], st = id >= 0 && stById(id), air = BOATS[boatMode].air;
+  if (!st || !(air ? st.air : st.dock)) { toast(t(air ? 'Click on an airport! ✈️' : 'Click on a dock! ⚓')); return; }
   if (boatDraft < 0 || boatDraft === id) { boatDraft = id; sfx('pop'); }
   else if (buyBoat(boatMode, boatDraft, id)) { boatDraft = -1; setTool('look'); return; }
   updateUI(true);
 }
 function boatBarHTML() {
-  const opts = [['dock', '⚓', 'Dock', COST.dock], ['ferry', BOATS.ferry.e, 'Ferry', BOATS.ferry.cost], ['cargo', BOATS.cargo.e, 'Cargo ship', BOATS.cargo.cost]];
+  const opts = tool === 'air' ? [['airport', '🛫', 'Airport', COST.airport], ...['plane', 'freighter'].map(k => [k, BOATS[k].e, BOATS[k].name, BOATS[k].cost])]
+    : [['dock', '⚓', 'Dock', COST.dock], ['ferry', BOATS.ferry.e, 'Ferry', BOATS.ferry.cost], ['cargo', BOATS.cargo.e, 'Cargo ship', BOATS.cargo.cost]];
   return `<div class="eng">${opts.map(([id, e, name, cost]) => `<button data-boat="${id}" class="${id === boatMode ? 'on' : ''}"><span class="be">${e}</span>${t(name)}<small>${price(cost)}🪙</small></button>`).join('')}</div>`;
 }
 // Drawn in the boat's own frame, facing +x.
@@ -1424,7 +1494,40 @@ function drawBoatBody(bt) {
   }
   if (sel && sel.type === 'boat' && sel.id === bt.id) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.05; ctx.beginPath(); ctx.arc(0, 0, 0.62, 0, 7); ctx.stroke(); }
 }
+// Seen from above: wings, tail and a round nose, facing +x.
+function drawPlaneBody(bt) {
+  const freight = bt.boat === 'freighter', body = freight ? bt.color : '#ffffff', wing = freight ? shade(bt.color, -0.15) : bt.color;
+  const L = freight ? 0.5 : 0.46, Wd = freight ? 0.1 : 0.08;
+  ctx.fillStyle = wing;
+  ctx.beginPath(); ctx.moveTo(0.08, -0.04); ctx.lineTo(-0.12, -0.48); ctx.lineTo(-0.24, -0.48); ctx.lineTo(-0.14, -0.04);
+  ctx.lineTo(-0.14, 0.04); ctx.lineTo(-0.24, 0.48); ctx.lineTo(-0.12, 0.48); ctx.lineTo(0.08, 0.04); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-L + 0.14, 0); ctx.lineTo(-L + 0.02, -0.2); ctx.lineTo(-L - 0.04, -0.2); ctx.lineTo(-L + 0.02, 0);
+  ctx.lineTo(-L - 0.04, 0.2); ctx.lineTo(-L + 0.02, 0.2); ctx.fill();
+  if (freight) { ctx.fillStyle = '#6b7b8c'; for (const y of [-0.3, 0.3]) { rr(ctx, -0.12, y - 0.04, 0.14, 0.08, 0.03); ctx.fill(); } }
+  ctx.beginPath(); ctx.ellipse(0, 0, L, Wd, 0, 0, 7); ctx.fillStyle = body; ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 0.02; ctx.stroke();
+  if (!freight) { ctx.fillStyle = bt.color; ctx.fillRect(-L + 0.06, -0.015, L * 1.7, 0.03); }
+  ctx.fillStyle = '#5bb6e8'; ctx.beginPath(); ctx.ellipse(L - 0.1, 0, 0.06, Wd * 0.7, 0, 0, 7); ctx.fill();
+  if (sel && sel.type === 'boat' && sel.id === bt.id) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.05; ctx.beginPath(); ctx.arc(0, 0, 0.62, 0, 7); ctx.stroke(); }
+}
+function drawPlane(bt) {
+  const g = posAt(bt.trail, bt.s), h = alt(bt), p = craftPos(bt);
+  if (bt.trail.length > 1) bt.a = angAt(bt.trail, clamp(bt.s, 0.2, trailEnd(bt) - 0.2));
+  // the shadow stays on the ground and slides off to the side as the plane climbs
+  ctx.save(); ctx.translate(g.x + h * 0.35, g.y + 0.06 + h * 0.25); ctx.rotate(bt.a || 0); ctx.scale(0.9, 0.9);
+  ctx.globalAlpha = 0.22 - h * 0.08; ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.ellipse(0, 0, 0.46, 0.08, 0, 0, 7); ctx.fill(); ctx.fillRect(-0.22, -0.46, 0.14, 0.92); ctx.fillRect(-0.5, -0.18, 0.08, 0.36);
+  ctx.restore(); ctx.globalAlpha = 1;
+  ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(bt.a || 0); const k = 0.85 + h * 0.3; ctx.scale(k, k);
+  drawPlaneBody(bt);
+  ctx.restore();
+  const top = Object.entries(bt.load.reduce((o, l) => (o[l.type] = (o[l.type] || 0) + l.n, o), {})).sort((a, b) => b[1] - a[1])[0];
+  if (top) emo.push([CARGO[top[0]].e, p.x, p.y - 0.42, 0.26]);
+  lights.push([p.x + Math.cos(bt.a || 0) * 0.5, p.y + Math.sin(bt.a || 0) * 0.5, 0.7, 0.8]);
+  if (h > 0 && Math.sin(performance.now() / 180 + bt.id) > 0.6) lights.push([p.x, p.y, 0.4, 0.9]);
+}
 function drawBoat(bt) {
+  if (BOATS[bt.boat].air) return; // planes are drawn later, above everything
   const p = posAt(bt.trail, bt.s);
   if (bt.trail.length > 1) bt.a = angAt(bt.trail, clamp(bt.s, 0.2, trailEnd(bt) - 0.2));
   const bob = Math.sin(performance.now() / 500 + bt.id) * 0.02;
@@ -1435,6 +1538,37 @@ function drawBoat(bt) {
   const top = Object.entries(bt.load.reduce((o, l) => (o[l.type] = (o[l.type] || 0) + l.n, o), {})).sort((a, b) => b[1] - a[1])[0];
   if (top) emo.push([CARGO[top[0]].e, p.x, p.y - 0.42, 0.26]);
   lights.push([p.x + Math.cos(bt.a || 0) * 0.5, p.y + Math.sin(bt.a || 0) * 0.5, 0.7, 0.8]);
+}
+// Tower, terminal and hangar along the top row, the runway along the bottom.
+function drawAirport(c, s) {
+  const x = s.x - 1, y = s.y;
+  rr(c, x + 0.06, y + 0.1, 2.94, 1.94, 0.18); c.fillStyle = 'rgba(0,0,0,0.12)'; c.fill();
+  rr(c, x + 0.03, y + 0.03, 2.94, 1.94, 0.18); c.fillStyle = '#c9cfc6'; c.fill();
+  // runway
+  c.fillStyle = '#545b63'; c.fillRect(x + 0.08, y + 1.18, 2.84, 0.64);
+  c.fillStyle = '#ffffff';
+  for (let k = 0; k < 7; k++) c.fillRect(x + 0.4 + k * 0.33, y + 1.48, 0.18, 0.04);
+  for (const ex of [x + 0.14, x + 2.78]) for (let k = 0; k < 4; k++) c.fillRect(ex, y + 1.24 + k * 0.15, 0.08, 0.08);
+  c.fillStyle = '#f5d547'; for (let k = 0; k < 6; k++) { c.beginPath(); c.arc(x + 0.2 + k * 0.52, y + 1.14, 0.03, 0, 7); c.fill(); }
+  // control tower
+  c.fillStyle = '#e9e4d8'; c.fillRect(x + 0.36, y + 0.32, 0.28, 0.66);
+  c.beginPath(); c.arc(x + 0.5, y + 0.32, 0.22, 0, 7); c.fillStyle = '#5bb6e8'; c.fill();
+  c.strokeStyle = '#ffffff'; c.lineWidth = 0.05; c.stroke();
+  c.fillStyle = '#e8584f'; c.beginPath(); c.arc(x + 0.5, y + 0.32, 0.08, 0, 7); c.fill();
+  // terminal
+  rr(c, x + 1.06, y + 0.28, 0.88, 0.7, 0.08); c.fillStyle = '#f7f1e3'; c.fill();
+  c.fillStyle = '#6db6ef'; c.fillRect(x + 1.06, y + 0.24, 0.88, 0.14);
+  c.fillStyle = '#7cc8f0'; for (let k = 0; k < 4; k++) c.fillRect(x + 1.13 + k * 0.2, y + 0.5, 0.13, 0.2);
+  c.fillStyle = '#b9824d'; c.fillRect(x + 1.42, y + 0.76, 0.16, 0.22);
+  // hangar with a round roof, and a windsock
+  c.fillStyle = '#9aa7b2'; c.fillRect(x + 2.1, y + 0.42, 0.74, 0.56);
+  c.beginPath(); c.ellipse(x + 2.47, y + 0.42, 0.37, 0.2, 0, Math.PI, 0); c.fillStyle = '#b8c3cc'; c.fill();
+  c.strokeStyle = '#7d8a96'; c.lineWidth = 0.03; c.beginPath();
+  for (let k = 1; k < 4; k++) { c.moveTo(x + 2.1 + k * 0.185, y + 0.3); c.lineTo(x + 2.1 + k * 0.185, y + 0.98); }
+  c.stroke();
+  c.fillStyle = '#5c3b22'; c.fillRect(x + 2.9, y + 0.12, 0.03, 0.3);
+  c.fillStyle = '#ff8c42'; c.beginPath(); c.moveTo(x + 2.92, y + 0.12); c.lineTo(x + 2.62, y + 0.15); c.lineTo(x + 2.62, y + 0.23); c.lineTo(x + 2.92, y + 0.24); c.fill();
+  if (seasonIx() === 3) { c.fillStyle = '#ffffff'; c.beginPath(); c.ellipse(x + 2.47, y + 0.3, 0.3, 0.08, 0, Math.PI, 0); c.fill(); c.fillRect(x + 1.06, y + 0.22, 0.88, 0.06); }
 }
 // A wooden pier from the shore out over the water.
 function drawDock(c, s) {
@@ -1977,7 +2111,7 @@ function renderCache() {
     drawDeco(c, id, tx(i), ty(i), i);
     if (id === 'windmill' || id === 'pond' || id === 'lamp') animDeco.push([id, tx(i), ty(i)]);
   }
-  for (const s of G.stations) if (s.dock) drawDock(c, s); else drawStation(c, s);
+  for (const s of G.stations) if (s.dock) drawDock(c, s); else if (s.air) drawAirport(c, s); else drawStation(c, s);
   for (const p of G.places) if (p.kind !== 'town') {
     const bx = p.x + 1.72, by = p.y + 0.28;
     c.fillStyle = 'rgba(0,0,0,0.18)'; c.beginPath(); c.arc(bx + 0.04, by + 0.06, 0.3, 0, 7); c.fill();
@@ -2015,7 +2149,7 @@ function drawMini() {
   c.drawImage(miniImg, 0, 0);
   c.fillStyle = '#ffffff';
   for (const tr of G.trains) { const p = posAt(tr.trail, tr.d); c.fillRect(p.x * miniPx - 1.5, p.y * miniPx - 1.5, 3, 3); }
-  for (const bt of G.boats) { const p = posAt(bt.trail, bt.s); c.fillRect(p.x * miniPx - 1.5, p.y * miniPx - 1.5, 3, 3); }
+  for (const bt of G.boats) { const p = craftPos(bt); c.fillRect(p.x * miniPx - 1.5, p.y * miniPx - 1.5, 3, 3); }
   const top = viewArea.top, bot = innerHeight - viewArea.bot;
   const x0 = (0 - view.ox) / view.s, y0 = (top - view.oy) / view.s, x1 = (innerWidth - view.ox) / view.s, y1 = (bot - view.oy) / view.s;
   c.strokeStyle = '#ffffff'; c.lineWidth = 2;
@@ -2160,6 +2294,7 @@ function* allTiles() { for (let i = 0; i < W * H; i++) yield i; }
 function drawBridgesOverBoats() {
   const tiles = new Set();
   for (const bt of G.boats) {
+    if (BOATS[bt.boat].air) continue;
     const p = posAt(bt.trail, bt.s), x0 = Math.floor(p.x), y0 = Math.floor(p.y);
     for (let y = y0 - 1; y <= y0 + 1; y++) for (let x = x0 - 1; x <= x0 + 1; x++) {
       if (!inB(x, y)) continue;
@@ -2549,6 +2684,7 @@ function draw() {
     ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill();
   }
   ctx.globalAlpha = 1;
+  for (const bt of G.boats) if (BOATS[bt.boat].air) drawPlane(bt);
   drawWeather(false);
   drawNight(darkness());
   worldMode();
@@ -2559,9 +2695,9 @@ function draw() {
   const fs = clamp(view.s * 0.42, 11, 18);
   // town names sit just above the top row of houses, so the town hall in the middle stays visible
   for (const p of G.places) if (p.kind === 'town') pill(tn(p.name), sx(p.cx), sy(Math.min(...p.tiles.map(ty)) - 0.2), fs, 'rgba(255,250,235,0.92)', '#4a3426');
-  if (hover && (tool === 'look' || tool === 'station' || tool === 'train' || tool === 'boat')) {
+  if (hover && (tool === 'look' || tool === 'station' || tool === 'train' || tool === 'boat' || tool === 'air')) {
     const sId = G.stn[hover.i], pId = G.occ[hover.i];
-    const label = sId >= 0 ? `${stById(sId).dock ? '⚓' : '🚉'} ${tn(stById(sId).name)}` : pId >= 0 && G.places[pId].kind !== 'town' ? tn(G.places[pId].name) : null;
+    const label = sId >= 0 ? `${stById(sId).dock ? '⚓' : stById(sId).air ? '✈️' : '🚉'} ${tn(stById(sId).name)}` : pId >= 0 && G.places[pId].kind !== 'town' ? tn(G.places[pId].name) : null;
     if (label) pill(label, sx(hover.x + 0.5), sy(hover.y - 0.45), fs, '#4a3426', '#ffffff');
   }
   const dc = draftCost();
@@ -2589,10 +2725,12 @@ function pill(text, x, y, fs, bg, fg) {
   ctx.fillStyle = fg; ctx.fillText(text, x, y + 1);
 }
 
-function catchRect(x, y, fill, stroke) {
-  ctx.fillStyle = fill; ctx.fillRect(x - CATCH, y - CATCH, CATCH * 2 + 1, CATCH * 2 + 1);
+// The yellow square a stop picks up from. Airports' is bigger and covers both rows.
+function catchRect(x, y, fill, stroke, air) {
+  const r = air ? CATCH + 1 : CATCH, w = r * 2 + 1, h = w + (air ? 1 : 0);
+  ctx.fillStyle = fill; ctx.fillRect(x - r, y - r, w, h);
   ctx.strokeStyle = stroke; ctx.lineWidth = 0.06; ctx.setLineDash([0.2, 0.12]);
-  ctx.strokeRect(x - CATCH, y - CATCH, CATCH * 2 + 1, CATCH * 2 + 1); ctx.setLineDash([]);
+  ctx.strokeRect(x - r, y - r, w, h); ctx.setLineDash([]);
 }
 // Dashed blue lines to the stations and docks that share goods with a stop at (x, y).
 function linkLines(x, y, st) {
@@ -2609,7 +2747,8 @@ function outlinePlace(p, col) {
 
 function drawOverlay() {
   const selSt = sel && sel.type === 'station' && stById(sel.id);
-  if (selSt) { catchRect(selSt.x, selSt.y, 'rgba(255,230,100,0.18)', '#f2b632'); selSt.places.forEach(id => outlinePlace(G.places[id], '#ffffff')); linkLines(selSt.x, selSt.y, selSt); }
+  if (selSt && selSt.air) { catchRect(selSt.x, selSt.y, 'rgba(255,230,100,0.18)', '#f2b632', selSt); selSt.places.forEach(id => outlinePlace(G.places[id], '#ffffff')); linkLines(selSt.x, selSt.y, selSt); }
+  else if (selSt) { catchRect(selSt.x, selSt.y, 'rgba(255,230,100,0.18)', '#f2b632'); selSt.places.forEach(id => outlinePlace(G.places[id], '#ffffff')); linkLines(selSt.x, selSt.y, selSt); }
   const selTr = sel && sel.type === 'train' && trById(sel.id);
   if (selTr) drawRoute(selTr.route, selTr.color, false);
   if (tool === 'train') drawRoute(routeDraft, '#ff7a59', true);
@@ -2619,11 +2758,11 @@ function drawOverlay() {
     selBoat.trail.forEach((p, k) => k ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
     ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
   }
-  if (tool === 'boat' && boatMode !== 'dock') for (const s of G.stations) if (s.dock) {
+  if ((tool === 'boat' && boatMode !== 'dock') || (tool === 'air' && boatMode !== 'airport')) for (const s of G.stations) if (tool === 'air' ? s.air : s.dock) {
     ctx.strokeStyle = s.id === boatDraft ? '#ffd23f' : '#ffffff'; ctx.lineWidth = s.id === boatDraft ? 0.12 : 0.07;
-    ctx.beginPath(); ctx.arc(s.x + 0.5, s.y + 0.5, 0.62 + Math.sin(performance.now() / 250) * 0.05, 0, 7); ctx.stroke();
+    ctx.beginPath(); ctx.arc(s.x + 0.5, s.y + (s.air ? 1 : 0.5), (s.air ? 1.3 : 0.62) + Math.sin(performance.now() / 250) * 0.05, 0, 7); ctx.stroke();
   }
-  if (tool === 'train') for (const s of G.stations) if (!s.dock) {
+  if (tool === 'train') for (const s of G.stations) if (railStn(s)) {
     ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.07; ctx.beginPath(); ctx.arc(s.x + 0.5, s.y + 0.5, 0.62 + Math.sin(performance.now() / 250) * 0.05, 0, 7); ctx.stroke();
   }
   const selBus = sel && sel.type === 'bus' && busById(sel.id), bc = selBus && busCar(selBus);
@@ -2644,6 +2783,13 @@ function drawOverlay() {
     const ok = decoOk(i);
     if (ok) { ctx.globalAlpha = 0.65; drawDeco(ctx, draftDeco, x, y); ctx.globalAlpha = 1; }
     ctx.strokeStyle = ok ? '#3fb36b' : '#e74c3c'; ctx.lineWidth = 0.08; ctx.strokeRect(x + 0.04, y + 0.04, 0.92, 0.92);
+  } else if (tool === 'air' && boatMode === 'airport') {
+    const ok = airportOk(i);
+    if (ok) {
+      catchRect(x, y, 'rgba(255,230,100,0.22)', '#f2b632', true); linkLines(x, y);
+      for (const p of G.places) if (p.tiles.some(t => Math.abs(tx(t) - x) <= CATCH + 1 && Math.abs(ty(t) - y - 0.5) <= CATCH + 1.5)) outlinePlace(p, '#ffffff');
+    }
+    ctx.strokeStyle = ok ? '#3fb36b' : '#e74c3c'; ctx.lineWidth = 0.1; ctx.strokeRect(x - 1 + 0.05, y + 0.05, 2.9, 1.9);
   } else if (tool === 'boat' && boatMode === 'dock') {
     const ok = dockOk(i);
     if (ok) { catchRect(x, y, 'rgba(255,230,100,0.22)', '#f2b632'); linkLines(x, y); }
@@ -2914,10 +3060,12 @@ function toast(msg) {
 
 function setTool(name, keepEdit) {
   tool = name; draft = null; busDraft = -1; boatDraft = -1;
+  if (name === 'boat' && !['dock', 'ferry', 'cargo'].includes(boatMode)) boatMode = 'dock';
+  if (name === 'air' && !['airport', 'plane', 'freighter'].includes(boatMode)) boatMode = 'airport';
   if (!keepEdit && editTrain >= 0) { editTrain = -1; routeDraft = []; }
   if (name !== 'train') routeDraft = [];
   document.querySelectorAll('#tools button').forEach(b => b.classList.toggle('on', b.dataset.tool === name));
-  if (name === 'train' && G.stations.filter(s => !s.dock).length < 2) toast(t('You need two stations first! 🚉🚉'));
+  if (name === 'train' && G.stations.filter(railStn).length < 2) toast(t('You need two stations first! 🚉🚉'));
   updateUI(true);
 }
 
@@ -2937,13 +3085,17 @@ function hintText() {
     if (boatMode === 'dock') return t('Click on the water right next to the shore to build a ⚓ dock. It picks up from everything in the yellow square.');
     return t(boatDraft < 0 ? 'Click the dock where your boat should start. ⛴️ Ferries carry passengers, 🚢 cargo ships carry goods.' : 'Now click another dock across the water!');
   }
+  if (tool === 'air') {
+    if (boatMode === 'airport') return t('Click on flat, empty land to build a ✈️ airport. It needs room for a runway: 3 tiles wide and 2 tall.');
+    return t(boatDraft < 0 ? 'Click the airport where your plane should start. ✈️ Planes carry passengers, 🛩️ cargo planes carry goods.' : 'Now click another airport to fly to!');
+  }
   if (tool === 'road') return t('Drag to draw a road, then let go to build it. Join two towns so 🚌 buses can drive between them. Roads can cross straight track.');
   if (tool === 'bus') return t(busDraft < 0 ? 'Click a town to start a bus route. Buses drive on the roads 🚌' : 'Now click another town joined to it by a road!');
   let track = 0;
   for (let i = 0; i < W * H; i++) if (G.conn[i]) { track++; break; }
   if (tool === 'track' && track) return t('Drag to draw rails, then let go to build them. Rails can cross roads 🚗 and go through hills ⛰️ in tunnels.');
   if (!track) return t("Hi! I'm Conductor Bea. Pick 🛤️ Track and drag on the map to lay rails from a town to somewhere else!");
-  if (G.stations.filter(s => !s.dock).length < 2) return t('Lovely rails! Now pick 🚉 Station and put a station on the track near each end.');
+  if (G.stations.filter(railStn).length < 2) return t('Lovely rails! Now pick 🚉 Station and put a station on the track near each end.');
   if (!G.trains.length) return t('Choo choo! Pick 🚂 Train, click your stations, then press Go!');
   if (G.trains.some(tr => tr.state === 'lost')) return t("A train with ❓ can't find a way. Check that the track joins up!");
   return t(TIPS[Math.floor(G.time / 14) % TIPS.length]);
@@ -2993,12 +3145,13 @@ function panelHTML() {
     const B = BOATS[bt.boat], tot = {}, sure = armed === 'sellboat' + bt.id;
     for (const l of bt.load) tot[l.type] = (tot[l.type] || 0) + l.n;
     const route = bt.route.map(id => { const s = stById(id); return `<span class="${id === bt.target ? 'cur' : ''}">${s ? tn(s.name) : '?'}</span>`; }).join(' ⇄ ');
-    const status = t(bt.state === 'lost' ? "❓ Can't find a way over the water" : bt.state === 'run' ? '🌊 Sailing' : '⚓ At the dock');
+    const status = t(B.air ? (bt.state === 'run' ? (alt(bt) > 0 ? '☁️ Flying' : '🛬 On the runway') : '🛫 At the airport')
+      : bt.state === 'lost' ? "❓ Can't find a way over the water" : bt.state === 'run' ? '🌊 Sailing' : '⚓ At the dock');
     return `<div class="ph"><span class="sw" style="background:${bt.color}"></span>${B.e} ${boatName(bt)} <small>${t(B.name)}</small>${close}</div>
       <div class="row">${status}</div>
       <div class="row"><b>${t('Route:')}</b> ${route}</div>
       <div class="row"><b>${t('Carrying:')}</b> ${cargoList(tot) || t('nothing yet')} <small>(${loaded(bt)}/${capacity(bt)})</small></div>
-      <div class="row"><small>${t(bt.boat === 'ferry' ? 'Carries passengers 🧒' : 'Carries goods, not passengers')}</small></div>
+      <div class="row"><small>${t(B.takes('people') ? 'Carries passengers 🧒' : 'Carries goods, not passengers')}</small></div>
       <div class="row"><b>${t('Earned:')}</b> 🪙 ${bt.earned}${boatRun(bt) ? ` <small>· ${t('costs {n}🪙 a minute to run', { n: boatRun(bt) })}</small>` : ''}</div>
       ${prioRow(bt)}
       <div class="btns"><button data-act="goods" class="${goodsOpen ? 'armed' : ''}">${t('📦 Goods')}</button><button data-act="sellboat" class="${sure ? 'armed' : ''}">${t(sure ? 'Sure? 💰' : '💰 Sell')}</button></div>
@@ -3007,15 +3160,15 @@ function panelHTML() {
   if (sel.type === 'station') {
     const s = stById(sel.id); if (!s) return '';
     const near = s.places.map(id => tn(G.places[id].name)).join(', ') || t('nothing nearby'), links = hub(s).slice(1);
-    const visits = s.dock ? G.boats.filter(bt => bt.route.includes(s.id)).map(boatName).join(', ') || t('no boats yet')
+    const visits = s.dock || s.air ? G.boats.filter(bt => bt.route.includes(s.id)).map(boatName).join(', ') || t(s.air ? 'no planes yet' : 'no boats yet')
       : G.trains.filter(tr => tr.route.includes(s.id)).map(tr => esc(tn(tr.name))).join(', ') || t('no trains yet');
-    return `<div class="ph">${s.dock ? '⚓' : '🚉'} ${tn(s.name)}${close}</div>
+    return `<div class="ph">${s.dock ? '⚓' : s.air ? '✈️' : '🚉'} ${tn(s.name)}${close}</div>
       <div class="row"><b>${t('Waiting:')}</b> ${cargoList(s.cargo) || t('nothing')}</div>
       <div class="row"><b>${t('Sends:')}</b> ${emojis([...hubSupplies(s)]) || '—'}</div>
       <div class="row"><b>${t('Wants:')}</b> ${emojis([...hubAccepts(s)]) || '—'}</div>
       <div class="row"><b>${t('Near:')}</b> ${near}</div>
       ${links.length ? `<div class="row"><b>${t('🔗 Shares goods with:')}</b> ${links.map(l => tn(l.name)).join(', ')}</div>` : ''}
-      <div class="row"><b>${t(s.dock ? 'Boats:' : 'Trains:')}</b> ${visits}</div>`;
+      <div class="row"><b>${t(s.dock ? 'Boats:' : s.air ? 'Planes:' : 'Trains:')}</b> ${visits}</div>`;
   }
   if (sel.type === 'place') {
     const p = G.places[sel.id], k = KINDS[p.kind];
@@ -3118,8 +3271,8 @@ function updateUI(force) {
   $('routebar').hidden = tool !== 'train';
   if (tool === 'train') setHTML('routebar', routeBarHTML());
   $('decobar').hidden = tool !== 'deco';
-  $('boatbar').hidden = tool !== 'boat';
-  if (tool === 'boat') setHTML('boatbar', boatBarHTML());
+  $('boatbar').hidden = tool !== 'boat' && tool !== 'air';
+  if (tool === 'boat' || tool === 'air') setHTML('boatbar', boatBarHTML());
   if (tool === 'deco' && setHTML('decobar', `${decoBarHTML()}<!--${seasonIx()}-->`)) drawDecoPreviews();
   const S = season();
   $('season').textContent = `${S.e} ${t(S.name)} · ${CARGO[S.bonus].e}×2 ${dayIcon()}`;
@@ -3209,12 +3362,12 @@ function pick(w, tile) {
   }
   for (const c of cars) { const p = carPose(c), d = Math.hypot(p.x - w.x, p.y - w.y); if (d < cd) { cd = d; car = c; } }
   let boat = null, btd = 0.55;
-  for (const bt of G.boats) { const p = posAt(bt.trail, bt.s), d = Math.hypot(p.x - w.x, p.y - w.y); if (d < btd) { btd = d; boat = bt; } }
+  for (const bt of G.boats) { const p = craftPos(bt), d = Math.hypot(p.x - w.x, p.y - w.y); if (d < btd) { btd = d; boat = bt; } }
   const prev = sel && sel.type + sel.id;
   if (boat && !best) {
     sel = { type: 'boat', id: boat.id };
-    const p = posAt(boat.trail, boat.s);
-    sfx('honk'); floater(p.x, p.y - 0.4, t('Hoot hoot!'), '#ffffff');
+    const p = craftPos(boat);
+    sfx('honk'); floater(p.x, p.y - 0.4, t(BOATS[boat.boat].air ? 'Whoosh!' : 'Hoot hoot!'), '#ffffff');
   } else if (best) {
     sel = { type: 'train', id: best.id };
     const p = posAt(best.trail, best.d);
@@ -3247,6 +3400,7 @@ function trainToolClick(tile) {
   const id = G.stn[tile.i];
   if (id < 0) { toast(t('Click on a station! 🚉')); return; }
   if (stById(id).dock) { toast(t("Trains can't go to a dock! Use ⛴️ Boats.")); return; }
+  if (stById(id).air) { toast(t("Trains can't go to an airport! Use ✈️ Planes.")); return; }
   if (routeDraft.includes(id)) { toast(t('That station is already on the route.')); return; }
   routeDraft.push(id); sfx('pop'); updateUI(true);
 }
@@ -3314,7 +3468,7 @@ cv.addEventListener('pointerdown', e => {
   else if (tool === 'station') buildStation(tile.i);
   else if (tool === 'train') trainToolClick(tile);
   else if (tool === 'bus') busToolClick(tile);
-  else if (tool === 'boat') boatToolClick(tile);
+  else if (tool === 'boat' || tool === 'air') boatToolClick(tile);
   else if (tool === 'signal' && G.adv) toggleSignal(tile.i);
   updateUI();
 });
@@ -3480,6 +3634,7 @@ addEventListener('keydown', e => {
   const tools = ['look', 'track', 'station', 'train', 'road', 'bus', 'boat', 'deco', 'remove', 'signal'];
   const kn = e.key === '0' ? 10 : /^[1-9]$/.test(e.key) ? +e.key : 0;
   if (kn && kn <= (G.adv ? 10 : 9)) setTool(tools[kn - 1]);
+  else if (e.key === 'a' || e.key === 'A') setTool('air');
   else if (e.key === 'z' || e.key === 'Z') { undo(); e.preventDefault(); }
   else if (e.key === 'Escape') { if (draft) draft = null; else { sel = null; setTool('look'); } }
   else if (e.key === 'Enter' && tool === 'train') routeAct('go');
@@ -3513,8 +3668,8 @@ function snapshot() {
   return {
       v: 1, seed: G.seed, W, H, scn: G.scn, diff: G.diff, adv: G.adv, sig: G.adv ? Array.from(G.sig) : undefined, runT: G.runT, runAcc: G.runAcc, coins: G.coins, stars: G.stars, time: G.time, nextId: G.nextId, nameIx: G.nameIx, piggyAt: G.piggyAt,
       terr: Array.from(G.terr), conn: Array.from(G.conn), road: Array.from(G.road), deco: Array.from(G.deco), roads: G.roads, places: G.places,
-      stations: G.stations.map(({ id, x, y, name, cargo, dock }) => ({ id, x, y, name, cargo, dock })),
-      boats: G.boats.map(({ id, boat, n, route, target, load, earned, color, prio, only }) => ({ id, boat, n, route, target, load, earned, color, prio, only })), boatN: G.boatN,
+      stations: G.stations.map(({ id, x, y, name, cargo, dock, air }) => ({ id, x, y, name, cargo, dock, air })),
+      boats: G.boats.map(({ id, boat, n, route, target, load, earned, color, prio, only }) => ({ id, boat, n, route, target, load, earned, color, prio, only })), boatN: G.boatN, airN: G.airN,
       trains: G.trains.map(t => ({ id: t.id, name: t.name, color: t.color, pattern: t.pattern, face: t.face, eng: t.eng, wagons: t.wagons, route: t.route, target: t.target, load: t.load, earned: t.earned, prio: t.prio, only: t.only })),
       buses: G.buses, busN: G.busN, stats: G.stats, quests: G.quests,
   };
@@ -3535,11 +3690,11 @@ function load(d) {
       road: d.road ? Uint8Array.from(d.road) : new Uint8Array(W * H), deco: d.deco ? Uint8Array.from(d.deco) : new Uint8Array(W * H),
       occ: new Int16Array(W * H).fill(-1), stn: new Int32Array(W * H).fill(-1),
       places: d.places, stations: d.stations.map(s => ({ ...s, places: [] })), trains: [], roads: d.roads || [],
-      buses: d.buses || [], busN: d.busN || 0, boats: [], boatN: d.boatN || 0, stats: d.stats, quests: (d.quests || []).filter(q => q.kind !== 'deliver' || CARGO[q.type]),
+      buses: d.buses || [], busN: d.busN || 0, boats: [], boatN: d.boatN || 0, airN: d.airN || 0, stats: d.stats, quests: (d.quests || []).filter(q => q.kind !== 'deliver' || CARGO[q.type]),
     };
     for (const p of G.places) for (const i of p.tiles) G.occ[i] = p.id;
     while (G.quests.length < 3) G.quests.push(makeQuest());
-    for (const s of G.stations) G.stn[idx(s.x, s.y)] = s.id;
+    for (const s of G.stations) for (const i of stnTiles(s)) G.stn[i] = s.id;
     refreshCatch();
     for (const t of d.trains) {
       const st = stById(t.target) || stById(t.route[0]);
@@ -3733,7 +3888,7 @@ if (/[?&]debug\b/.test(location.search)) {
     setTool, produce, idx, KINDS, CARGO, save, load, undo, beginAct, endAct, placeDeco, draftStart, draftTo, draftCommit,
     darkness, seasonIx, gateDown, buyBus, sellBus, roadRoute, pick, panelAct, panelHTML, deliver, makeQuest,
     get sel() { return sel; }, set sel(v) { sel = v; },
-    get W() { return W; }, get H() { return H; }, view, zoomAt, centerOn, clampView, minScale, startScenario, openMaps, checkGoal, SCENARIOS, SIZES, sized, DIFFS, price, trainRun, busRun, payRunning, toggleSignal, updTaken, sigLimit, posAt, checkCrashes, rescueTrain, get taken() { return taken; }, get mapAdv() { return mapAdv; }, set mapAdv(v) { mapAdv = v; }, get mapDiff() { return mapDiff; }, set mapDiff(v) { mapDiff = v; }, get mapSize() { return mapSize; }, setRoute, routeGoods, goodsHTML, serve, hub, hubAccepts, onward, routeAct, routeBarHTML, get editTrain() { return editTrain; }, get routeDraft() { return routeDraft; }, buildDock, buyBoat, sellBoat, waterPath, dockOk, boatToolClick, get boatMode() { return boatMode; }, set boatMode(v) { boatMode = v; }, BOATS, copySaveText, loadSaveText, roadsChanged, connectRoad, roadLinkCost, get roadsN() { return G.roads.length; }, snapshot, readSlot, slotAct, loadSave, openSaves, exportSave, SLOTS, set mapSize(v) { mapSize = v; }, resize, get cars() { return cars; }, get undoStack() { return undoStack; }, get draft() { return draft; },
+    get W() { return W; }, get H() { return H; }, view, zoomAt, centerOn, clampView, minScale, startScenario, openMaps, checkGoal, SCENARIOS, SIZES, sized, DIFFS, price, trainRun, busRun, payRunning, toggleSignal, updTaken, sigLimit, posAt, checkCrashes, rescueTrain, get taken() { return taken; }, get mapAdv() { return mapAdv; }, set mapAdv(v) { mapAdv = v; }, get mapDiff() { return mapDiff; }, set mapDiff(v) { mapDiff = v; }, get mapSize() { return mapSize; }, setRoute, routeGoods, goodsHTML, serve, hub, hubAccepts, onward, routeAct, routeBarHTML, get editTrain() { return editTrain; }, get routeDraft() { return routeDraft; }, buildDock, buildAirport, airportOk, alt, craftPos, buyBoat, sellBoat, waterPath, dockOk, boatToolClick, get boatMode() { return boatMode; }, set boatMode(v) { boatMode = v; }, BOATS, copySaveText, loadSaveText, roadsChanged, connectRoad, roadLinkCost, get roadsN() { return G.roads.length; }, snapshot, readSlot, slotAct, loadSave, openSaves, exportSave, SLOTS, set mapSize(v) { mapSize = v; }, resize, get cars() { return cars; }, get undoStack() { return undoStack; }, get draft() { return draft; },
   };
 }
 })();
